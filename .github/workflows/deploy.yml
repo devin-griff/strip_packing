@@ -1,0 +1,38 @@
+# Auto-deploy to Fly.io on every push to main.
+# Identical workflow used across all Griffith PSE Streamlit app repos.
+name: Deploy to Fly.io
+
+on:
+  push:
+    branches: [main]
+  # Lets you trigger a deploy manually from the Actions tab without a code change.
+  workflow_dispatch:
+
+# Opt JavaScript actions (e.g. actions/checkout) into Node 24 ahead of GitHub's
+# forced switch on June 2 2026. Without this, the runner prints a deprecation
+# warning every build until then.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  # If a new push happens while a deploy is running, queue the new one rather
+  # than cancelling the in-progress one (cancelling mid-deploy can leave the
+  # app in a half-updated state).
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
