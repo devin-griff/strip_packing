@@ -10,10 +10,9 @@ Generalized disjunctive programming for rectangle packing
     pip install -r requirements.txt
     streamlit run app.py
 
-GLPK must be on PATH (used to solve the Big-M / Hull MILP after the GDP
-transformation):
-- Debian/Ubuntu: `apt-get install glpk-utils`
-- macOS: `brew install glpk`
+HiGHS ships as a pip wheel (`highspy`) and solves the Big-M / Hull MILP after
+the GDP transformation. `pip install` covers everything — no separate solver
+install needed.
 
 ## Deployment
 

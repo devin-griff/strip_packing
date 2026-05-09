@@ -34,8 +34,6 @@
 
 import base64
 import copy
-import os
-import tempfile
 from pathlib import Path
 
 import altair as alt
@@ -133,50 +131,29 @@ def build_model(data):
 
 
 def _solve_capturing(m, transform):
-    """Apply the GDP transformation, run GLPK, return (results, log_text).
-    Captures GLPK's subprocess stdout via two mechanisms (FD-level redirect +
-    logfile=) so we get output reliably across platforms."""
+    """Apply the GDP transformation, run HiGHS, return (results, log_text).
+    Captures HiGHS's stdout via Pyomo's capture_output (FD-level redirect on
+    newer Pyomo, plain stdout capture on older). HiGHS via the appsi_highs
+    LegacySolver doesn't support a logfile= kwarg, so the FD capture is the
+    only path."""
     # Reformulate the GDP into a standard MILP. Big-M produces fewer
     # variables but weaker LP relaxations; Hull adds disaggregated copies of
     # the variables but tends to give tighter relaxations and better solve
     # times on harder instances.
     pyo.TransformationFactory(transform).apply_to(m)
 
-    # Two capture paths run in parallel because each is unreliable on its own:
-    #   1. capture_output(capture_fd=True) — redirects at the OS file
-    #      descriptor level, which catches output from child processes like
-    #      the GLPK binary. The capture_fd kwarg only exists in newer Pyomo,
-    #      hence the TypeError fallback.
-    #   2. logfile=log_path — asks GLPK itself to write its log to a file.
-    #      Used as a backup if the FD capture comes back empty.
-    fd, log_path = tempfile.mkstemp(suffix=".glpk.log")
-    os.close(fd)
     log_text = ""
     try:
-        try:
-            with capture_output(capture_fd=True) as buf:
-                solver = pyo.SolverFactory("glpk")
-                results = solver.solve(m, tee=True, logfile=log_path)
-            log_text = buf.getvalue()
-        except TypeError:
-            # Older Pyomo without capture_fd — fall back to the plain form.
-            with capture_output() as buf:
-                solver = pyo.SolverFactory("glpk")
-                results = solver.solve(m, tee=True, logfile=log_path)
-            log_text = buf.getvalue()
-        # If the in-memory capture missed the output, read the on-disk log.
-        if not log_text.strip():
-            try:
-                with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                    log_text = f.read()
-            except OSError:
-                pass
-    finally:
-        # Always clean up the temp log file.
-        try:
-            os.remove(log_path)
-        except OSError:
-            pass
+        with capture_output(capture_fd=True) as buf:
+            solver = pyo.SolverFactory("appsi_highs")
+            results = solver.solve(m, tee=True)
+        log_text = buf.getvalue()
+    except TypeError:
+        # Older Pyomo without capture_fd — fall back to plain stdout capture.
+        with capture_output() as buf:
+            solver = pyo.SolverFactory("appsi_highs")
+            results = solver.solve(m, tee=True)
+        log_text = buf.getvalue()
     return results, log_text
 
 

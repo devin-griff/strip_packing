@@ -3,3 +3,4 @@ pyomo~=6.7
 altair~=5.0
 pandas~=2.0
 numpy~=1.26
+highspy~=1.14
