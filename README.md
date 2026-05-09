@@ -1,14 +1,19 @@
-# <APP_TITLE>
+# Strip Packing
 
-<APP_TAGLINE>
+Generalized disjunctive programming for rectangle packing
 
-**Live demo:** https://<APP_SLUG>.griffith-pse.com  
+**Live demo:** https://strip-packing.griffith-pse.com  
 **Home:** https://griffith-pse.com
 
 ## Run locally
 
     pip install -r requirements.txt
     streamlit run app.py
+
+GLPK must be on PATH (used to solve the Big-M / Hull MILP after the GDP
+transformation):
+- Debian/Ubuntu: `apt-get install glpk-utils`
+- macOS: `brew install glpk`
 
 ## Deployment
 
