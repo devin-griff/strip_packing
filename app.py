@@ -11,19 +11,20 @@
 #     i is left of j, i is right of j, i is below j, or i is above j.
 # Pyomo's `gdp` module expresses these `Disjunction` blocks natively. A
 # `TransformationFactory` step (Big-M or Hull) reformulates the GDP into a
-# standard MILP that GLPK can solve.
+# standard MILP that HiGHS can solve.
 #
 # Library roadmap:
 #   - streamlit  — the UI framework. Each interaction reruns this script
 #                  top-to-bottom; persistent values live in `st.session_state`.
 #   - pyomo      — algebraic modeling: sets, params, vars, objective,
 #                  constraints. The `pyomo.gdp` submodule adds Disjunction.
-#   - GLPK       — the MILP solver, called as a subprocess via Pyomo.
+#   - HiGHS      — the MILP solver, called via Pyomo's appsi_highs interface.
+#                  Ships as a pip wheel (`highspy`).
 #   - pandas     — DataFrame shape for Streamlit's data editor and Altair.
 #   - altair     — Rectangle plot with `mark_rect` + `mark_text` labels.
 #
 # File roadmap:
-#   1. Solver       — model definition, GDP transformation, GLPK log capture.
+#   1. Solver       — model definition, GDP transformation, HiGHS log capture.
 #   2. State        — session_state init / reset.
 #   3. Utilities    — DataFrame <-> internal-dict conversion, geometry helpers.
 #   4. LaTeX        — render the general formulation and instance summary.
@@ -65,9 +66,9 @@ DEFAULT_DATA = {
 #
 # Standard Pyomo with the `gdp` submodule. Disjunctions are written natively;
 # a `TransformationFactory` step rewrites them into ordinary MILP constraints
-# that GLPK can solve. The only twist is `_solve_capturing`, which works
-# around GLPK's subprocess stdout not being picked up by ordinary Python
-# stream redirection.
+# that HiGHS can solve. The only twist is `_solve_capturing`, which redirects
+# HiGHS's solver output at the OS file-descriptor level so we can show it in
+# the Logs tab.
 
 def build_model(data):
     # ConcreteModel: components bound to data at construction time.
@@ -188,9 +189,8 @@ def solve(data, transform="gdp.bigm"):
         return {
             "status": "solver_missing",
             "message": (
-                "GLPK solver binary not found. On Streamlit Cloud add "
-                "`glpk-utils` to packages.txt at the repo root. "
-                f"({e})"
+                "HiGHS solver not available. Run `pip install highspy` "
+                f"in your environment. ({e})"
             ),
             "x": {}, "y": {}, "H": None, "log": "", "transform": transform,
         }
@@ -301,7 +301,7 @@ def lower_bound_H(data):
 # ---------- Tabs ----------
 #
 # One render_* function per tab. Optimizer is the main view; Data lets the
-# user edit rectangles; Formulation shows the math; Logs shows GLPK output.
+# user edit rectangles; Formulation shows the math; Logs shows HiGHS output.
 
 # A 12-color categorical palette repeated as needed. Tableau-style; reads
 # well at small rectangle sizes and keeps adjacent indices distinguishable.
@@ -775,7 +775,7 @@ if abs(float(W_value) - float(st.session_state.data["W"])) > 1e-12:
 # Solve button. MILP can be slow for many rectangles, so it's explicit rather
 # than auto-running on every state change.
 if st.sidebar.button("Solve", type="primary", use_container_width=True):
-    with st.spinner("Solving GDP-transformed MILP via GLPK..."):
+    with st.spinner("Solving GDP-transformed MILP via HiGHS..."):
         st.session_state.optimal = solve(st.session_state.data, transform_key)
 
 # ── Header ────────────────────────────────────────────────────────────────────
