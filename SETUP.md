@@ -15,9 +15,9 @@ Either use the GitHub UI's "Use this template" button on this repo's page,
 or via CLI:
 
 ```bash
-APP_SLUG=pinch-analysis           # short, lowercase, hyphenated
-APP_TITLE="Pinch Analysis"        # human-readable display name
-APP_TAGLINE="Heat-integration via the pinch design method"
+APP_SLUG=strip-packing            # short, lowercase, hyphenated
+APP_TITLE="Strip Packing"         # human-readable display name
+APP_TAGLINE="Generalized disjunctive programming for rectangle packing"
 
 gh repo create devin-griff/$APP_SLUG \
     --template devin-griff/griffith-pse-app-template \
@@ -52,7 +52,7 @@ Edit `requirements.txt`. Pure-pip libraries — `pyomo`, `pyomo-ripopt`,
 `scikit-learn`, `scipy`, `plotly`, `altair`, `networkx`, `cvxpy`, `openai`,
 `anthropic`, etc. — just go on a line each.
 
-If you need a system library (GLPK solver binary, GraphViz, FFmpeg, etc.),
+If you need a system library (GraphViz for network diagrams, FFmpeg for video, etc.),
 uncomment the matching block in the `Dockerfile`.
 
 ### Sidebar vs. no sidebar
