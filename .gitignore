@@ -18,3 +18,7 @@ Thumbs.db
 
 # Build / logs
 *.log
+
+# Tooling: Claude Code per-project settings + notebook checkpoints
+.claude/
+.ipynb_checkpoints/
