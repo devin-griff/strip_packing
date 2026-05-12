@@ -41,7 +41,7 @@ COPY app.py favicon.png ./
 # default "Streamlit" title flashing for ~1s before being replaced.
 RUN STATIC=$(python -c "import streamlit, os; print(os.path.join(os.path.dirname(streamlit.__file__), 'static'))") \
     && sed -i 's|<title>Streamlit</title>|<title>Strip Packing</title>|' "$STATIC/index.html" \
-    && cp /app/favicon.png "$STATIC/favicon.png"
+    && cp /app/favicon.png "$STATIC/favicon.png" && cp /app/favicon.png "$STATIC/favicon.ico"
 
 # Run as a non-root user. If a future Streamlit (or transitive dep) RCE
 # lands in the container, the attacker doesn't get root. Defense in depth.
