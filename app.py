@@ -21,16 +21,13 @@
 #                  constraints. The `pyomo.gdp` submodule adds Disjunction.
 #   - HiGHS      — the MILP solver, called via Pyomo's appsi_highs interface.
 #                  Ships as a pip wheel (`highspy`).
-#   - pandas     — DataFrame shape for Streamlit's data editor and Altair.
-#   - altair     — Rectangle plot with `mark_rect` + `mark_text` labels.
 #
 # File roadmap:
 #   1. Solver       — model definition, GDP transformation, HiGHS log capture.
 #   2. State        — session_state init / reset.
-#   3. Utilities    — DataFrame <-> internal-dict conversion, geometry helpers.
+#   3. Utilities    — rectangle add/delete + geometry helpers.
 #   4. LaTeX        — render the general formulation and instance summary.
-#   5. Tabs         — render_optimizer / render_data / render_formulation /
-#                     render_logs.
+#   5. Tabs         — render_optimizer / render_formulation / render_logs.
 #   6. Main         — page config, sidebar, tab assembly.
 # =============================================================================
 
@@ -39,15 +36,12 @@ import copy
 import time
 from pathlib import Path
 
-import altair as alt
-import pandas as pd
 import pyomo.environ as pyo
 import streamlit as st
 from pyomo.common.errors import ApplicationError
 from pyomo.common.tee import capture_output
 from pyomo.gdp import Disjunction
 from pyomo.opt import TerminationCondition
-from streamlit_drawable_canvas import st_canvas
 
 
 # Hard cap on rectangle count. Big-M MILP gets slow beyond ~15 rectangles
@@ -274,39 +268,35 @@ def apply_reset():
     st.session_state.data = copy.deepcopy(DEFAULT_DATA)
     st.session_state.optimal = None
     st.session_state["W_input"] = float(DEFAULT_DATA["W"])
+    # Bump the rect-editor widget version so all per-rectangle steppers
+    # re-init from data instead of holding onto sticky pre-reset values.
+    st.session_state["_rect_editor_ver"] = (
+        st.session_state.get("_rect_editor_ver", 0) + 1
+    )
 
 
 # ---------- Utilities ----------
 #
-# Adapters between two data shapes:
-#   - The "internal" dict shape used by the solver and most of the app.
-#   - The DataFrame shape used by Streamlit's data editor widget.
-# Plus small helpers for areas, lower bounds, and labelled rows.
+# Rectangles are tracked by stable opaque integer ids — `rects` is a list
+# of ids, `w` and `length` map id → value. Ids don't renumber on delete:
+# this keeps widget state in the editor below from getting reassigned to a
+# different rectangle whenever one is removed.
 
-def data_to_df(data):
-    # Internal -> DataFrame. Used to seed the data editor each render.
-    return pd.DataFrame([
-        {"Index": int(i), "Width": float(data["w"][i]),
-         "Length": float(data["length"][i])}
-        for i in data["rects"]
-    ])
+def add_rect(data, w=1.0, length=1.0):
+    """Append a rectangle with a fresh id. Mutates `data` and returns it."""
+    new_id = (max(data["rects"]) + 1) if data["rects"] else 1
+    data["rects"] = list(data["rects"]) + [new_id]
+    data["w"] = dict(data["w"]); data["w"][new_id] = float(w)
+    data["length"] = dict(data["length"]); data["length"][new_id] = float(length)
+    return data
 
 
-def df_to_data(df, W):
-    # DataFrame -> internal. Normalizes whatever the user typed: drop blank
-    # rows, coerce numerics, clamp to non-negative. Indices are always
-    # renumbered 1..N so the user can delete rows freely without leaving gaps.
-    df = df.copy()
-    for col in ["Width", "Length"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    df = df.dropna(subset=["Width", "Length"])
-    df["Width"] = df["Width"].clip(lower=0.0)
-    df["Length"] = df["Length"].clip(lower=0.0)
-    df = df[(df["Width"] > 0) & (df["Length"] > 0)]
-    rects = list(range(1, len(df) + 1))
-    w = {i: float(row.Width) for i, row in zip(rects, df.itertuples())}
-    length = {i: float(row.Length) for i, row in zip(rects, df.itertuples())}
-    return {"rects": rects, "w": w, "length": length, "W": float(W)}
+def remove_rect(data, rid):
+    """Drop the rectangle with id `rid`. Mutates `data` and returns it."""
+    data["rects"] = [i for i in data["rects"] if i != rid]
+    data["w"] = {i: v for i, v in data["w"].items() if i != rid}
+    data["length"] = {i: v for i, v in data["length"].items() if i != rid}
+    return data
 
 
 def total_area(data):
@@ -325,6 +315,19 @@ def lower_bound_L(data):
     return max(max_length, area_lb)
 
 
+def naive_layout(data):
+    """Cascade layout — all rectangles at x=0, stacked end-to-end along
+    the L direction. This is the worst-case feasible packing and serves
+    as a no-solver default visualization."""
+    layout = {"x": {}, "y": {}}
+    cumulative = 0.0
+    for i in data["rects"]:
+        layout["x"][i] = 0.0
+        layout["y"][i] = cumulative
+        cumulative += float(data["length"][i])
+    return layout
+
+
 # ---------- Tabs ----------
 #
 # One render_* function per tab. Optimizer is the main view; Data lets the
@@ -338,52 +341,24 @@ _PALETTE = [
 ]
 
 
-# Pixel budget for both strips (user's drawable canvas and the optimizer's
-# Altair chart). They share the same x_top (extent along the H direction) and
-# the same scale, so they stack and align visually.
-_STRIP_MAX_W_PX = 720
-_STRIP_MAX_H_PX = 320
-
-
-def _strip_pixel_size(x_top, W):
-    """Pixel dimensions for both strips at a shared scale factor. Returns
-    (width_px, height_px, scale_px). The scale is the larger one that keeps
-    both dimensions inside the budget."""
-    if x_top <= 0 or W <= 0:
-        return _STRIP_MAX_W_PX, _STRIP_MAX_H_PX, 30.0
-    scale_px = min(_STRIP_MAX_W_PX / x_top, _STRIP_MAX_H_PX / W)
-    return int(scale_px * x_top), int(scale_px * W), scale_px
-
-
-def _render_compact_metrics(items):
-    """Render a stack of label / value pairs in less vertical space than
-    `st.metric`. Used in the narrow right column beside each strip so all
-    three metrics fit within the strip's pixel height instead of spilling
-    below it."""
-    blocks = []
-    for label, value in items:
-        blocks.append(
-            '<div style="margin-bottom:0.6rem;">'
-            f'<div style="font-size:0.8rem;color:rgba(49,51,63,0.65);'
-            f'line-height:1.2;">{label}</div>'
-            f'<div style="font-size:1.55rem;font-weight:400;color:#0e1117;'
-            f'line-height:1.2;">{value}</div>'
-            "</div>"
-        )
-    st.markdown("".join(blocks), unsafe_allow_html=True)
-
-
 def _render_optimizer_strip(data, layout, L, x_top):
-    """Render the optimizer's solved layout as absolutely-positioned HTML
-    divs at exactly the same pixel scale as the user's drawable-canvas strip
-    above it. Going via HTML (rather than Altair) lets us share the scale
-    factor directly — Altair's compound charts shave a few pixels off the
-    plot area for padding, which made the chart's rectangles slightly
-    smaller than the canvas's. Tooltips and a legend are sacrificed; rect
-    indices are drawn on top of each shape, same as on the user's strip."""
+    """Render the optimizer's layout as absolutely-positioned HTML divs
+    inside a responsive container. The container's width fills its parent
+    column (100%) and its aspect ratio is locked to x_top:W via the
+    `aspect-ratio` CSS property, so percentage-based child positions stay
+    geometrically accurate as the column resizes. Rectangles are drawn as
+    plain divs (rather than Altair marks) so the rendering is independent
+    of any chart-padding shrinkage."""
     rects = data["rects"]
     W = float(data["W"])
-    canvas_w, canvas_h, scale_px = _strip_pixel_size(x_top, W)
+    if x_top <= 0 or W <= 0:
+        st.markdown(
+            '<div style="width:100%;aspect-ratio:4/1;background:#f4f6fa;">'
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
     rect_divs = []
     has_layout = layout is not None and layout.get("x")
     for i in rects:
@@ -393,492 +368,295 @@ def _render_optimizer_strip(data, layout, L, x_top):
         y = float(layout["y"][i])
         w = float(data["w"][i])
         length = float(data["length"][i])
-        # 90° CW mapping: canvas_x = orig_y, canvas_y = orig_x; the
-        # rectangle's canvas extent is (length, w) since w runs along the
-        # W direction (vertical here) and length along the L direction
-        # (horizontal).
-        cx = y * scale_px
-        cy = x * scale_px
-        cw = length * scale_px
-        ch = w * scale_px
+        # 90° CW mapping: container x = orig y (along L), container y =
+        # orig x (along W). Positions and sizes are expressed as
+        # percentages of x_top (horizontal) and W (vertical) so the
+        # container can resize freely.
+        left_pct = (y / x_top) * 100.0
+        top_pct = (x / W) * 100.0
+        width_pct = (length / x_top) * 100.0
+        height_pct = (w / W) * 100.0
         color = _PALETTE[(int(i) - 1) % len(_PALETTE)]
         rect_divs.append(
-            f'<div style="position:absolute;left:{cx:.2f}px;top:{cy:.2f}px;'
-            f'width:{cw:.2f}px;height:{ch:.2f}px;background:{color};'
-            f'border:2px solid #ffffff;box-sizing:border-box;color:#ffffff;'
-            f'font-weight:700;font-size:14px;display:flex;align-items:center;'
-            f'justify-content:center;">{int(i)}</div>'
+            f'<div style="position:absolute;'
+            f'left:{left_pct:.4f}%;top:{top_pct:.4f}%;'
+            f'width:{width_pct:.4f}%;height:{height_pct:.4f}%;'
+            f'background:{color};'
+            f'border:2px solid #ffffff;box-sizing:border-box;'
+            f'color:#ffffff;font-weight:700;font-size:14px;'
+            f'display:flex;align-items:center;justify-content:center;">'
+            f"{int(i)}</div>"
         )
-    # Dashed red strip outline runs from x=0 to x=L if solved, otherwise to
-    # the shared x_top so the area doesn't collapse on a fresh page.
+    # Dashed red strip outline runs from x=0 to x=L if solved, otherwise
+    # to x_top so the area doesn't collapse on a fresh page.
     outline_w_units = L if (L is not None and L > 0) else x_top
-    outline_w_px = outline_w_units * scale_px
+    outline_w_pct = (outline_w_units / x_top) * 100.0
     outline_div = (
         f'<div style="position:absolute;left:0;top:0;'
-        f'width:{outline_w_px:.2f}px;height:{canvas_h}px;'
+        f'width:{outline_w_pct:.4f}%;height:100%;'
         f'border:2px dashed #dc2626;box-sizing:border-box;'
         f'pointer-events:none;"></div>'
     )
     container = (
-        f'<div style="position:relative;width:{canvas_w}px;'
-        f'height:{canvas_h}px;background:#f4f6fa;">'
+        f'<div style="position:relative;width:100%;'
+        f'aspect-ratio:{x_top} / {W};background:#f4f6fa;">'
         f'{outline_div}{"".join(rect_divs)}</div>'
     )
     st.markdown(container, unsafe_allow_html=True)
 
 
-# ---------- User strip (drag-and-drop) ----------
-#
-# The user's interactive strip is a Fabric.js canvas (via streamlit-drawable-
-# canvas) sized to exactly match the optimizer's HTML strip below it. Each
-# rectangle from the current data set is pre-placed in the strip, cascaded
-# from the top-left so they're individually clickable. The user drags them
-# into a packing of their choosing; on every interaction the canvas state
-# comes back as JSON and we convert it back to original-frame (x, y) for
-# overlap / out-of-strip validation and "used length" computation.
-
-def _initial_canvas_drawing(data, scale_px, x_top, W):
-    """Fabric.js JSON for the initial canvas state: one locked rectangle per
-    item in the current data set. Rectangles are pre-placed in a feasible
-    "worst-case" layout — all in a single row at the near edge of the strip
-    (x=0), stretched end-to-end along the L direction (so `Your length`
-    starts at L_max and the user improves from there)."""
-    rects = data["rects"]
-    objects = []
-    cumulative = 0.0  # running sum along the L direction (original y)
-    for idx, i in enumerate(rects):
-        w = float(data["w"][i])           # W-direction width → vertical on canvas
-        length = float(data["length"][i]) # L-direction length → horizontal on canvas
-        color = _PALETTE[(int(i) - 1) % len(_PALETTE)]
-        # End-to-end packing: orig_x = 0 (touching the strip's near edge),
-        # orig_y = cumulative length of all earlier rectangles.
-        orig_x = 0.0
-        orig_y = cumulative
-        cumulative += length
-        # 90° CW mapping for the canvas (y grows down): canvas_x = orig_y,
-        # canvas_y = orig_x. Each rectangle is a Fabric.js Group of (rect,
-        # text) so the index label moves with the shape during drags.
-        cw = length * scale_px
-        ch = w * scale_px
-        objects.append({
-            "type": "group",
-            "version": "4.6.0",
-            "originX": "left",
-            "originY": "top",
-            "left": orig_y * scale_px,
-            "top": orig_x * scale_px,
-            "width": cw,
-            "height": ch,
-            "lockScalingX": True,
-            "lockScalingY": True,
-            "lockRotation": True,
-            "hasControls": False,
-            # Override Fabric.js's default four-arrows "move" cursor — a grab
-            # hand reads better for "pick up and drag" UX.
-            "hoverCursor": "grab",
-            "moveCursor": "grabbing",
-            "subTargetCheck": False,
-            "objects": [
-                {
-                    "type": "rect",
-                    "version": "4.6.0",
-                    "originX": "center",
-                    "originY": "center",
-                    "left": 0,
-                    "top": 0,
-                    "width": cw,
-                    "height": ch,
-                    "fill": color,
-                    "stroke": "#ffffff",
-                    "strokeWidth": 2,
-                },
-                {
-                    "type": "text",
-                    "version": "4.6.0",
-                    "originX": "center",
-                    "originY": "center",
-                    "left": 0,
-                    "top": 0,
-                    "text": str(int(i)),
-                    "fontSize": 14,
-                    "fontFamily": "Helvetica",
-                    "fontWeight": "700",
-                    "fill": "#ffffff",
-                    "textAlign": "center",
-                },
-            ],
-        })
-    return {"version": "4.6.0", "objects": objects}
-
-
-def _parse_canvas_layout(canvas_result, scale_px, rects):
-    """Read rectangle positions from the canvas JSON state and return an
-    original-frame layout dict {x: {...}, y: {...}}. Objects come back in
-    the order they were drawn, which matches `rects`. Returns None when
-    the canvas hasn't reported yet or hasn't fully loaded its rectangles
-    — otherwise an interim report would zero-fill missing positions and
-    falsely flag every rectangle as overlapping at the origin."""
-    if canvas_result is None or canvas_result.json_data is None:
-        return None
-    objs = [o for o in canvas_result.json_data.get("objects", [])
-            if o.get("type") == "group"]
-    if len(objs) < len(rects):
-        return None
-    layout = {"x": {}, "y": {}}
-    for idx, i in enumerate(rects):
-        o = objs[idx]
-        # The group is serialized with originX="left", originY="top", so
-        # `left`/`top` is the top-left corner. canvas_x = orig_y,
-        # canvas_y = orig_x → invert when mapping back.
-        layout["x"][i] = float(o.get("top", 0.0)) / scale_px
-        layout["y"][i] = float(o.get("left", 0.0)) / scale_px
-    return layout
-
-
-def _validate_user_layout(data, layout):
-    """Compute used length, overlapping pairs, and out-of-strip rectangles.
-    The canvas already constrains rectangles inside its area, so out-of-
-    strip flags should only fire on data edge cases. Tolerance of 0.01 lets
-    rectangles touch edges without registering an overlap."""
-    if layout is None:
-        return None
-    rects = data["rects"]
-    W = float(data["W"])
-    tol = 0.01
-    overlaps = []
-    oob = set()
-    used_length = 0.0
-    for i in rects:
-        x = float(layout["x"].get(i, 0.0))
-        y = float(layout["y"].get(i, 0.0))
-        w = float(data["w"][i])
-        length = float(data["length"][i])
-        if x < -tol or x + w > W + tol or y < -tol:
-            oob.add(int(i))
-        used_length = max(used_length, y + length)
-    for idx_i, i in enumerate(rects):
-        xi = float(layout["x"].get(i, 0.0))
-        yi = float(layout["y"].get(i, 0.0))
-        wi = float(data["w"][i])
-        li = float(data["length"][i])
-        for j in rects[idx_i + 1:]:
-            xj = float(layout["x"].get(j, 0.0))
-            yj = float(layout["y"].get(j, 0.0))
-            wj = float(data["w"][j])
-            lj = float(data["length"][j])
-            x_sep = (xi + wi <= xj + tol) or (xj + wj <= xi + tol)
-            y_sep = (yi + li <= yj + tol) or (yj + lj <= yi + tol)
-            if not (x_sep or y_sep):
-                overlaps.append((int(i), int(j)))
-    return {
-        "used_length": used_length,
-        "overlaps": overlaps,
-        "oob": sorted(oob),
-        "feasible": (not overlaps) and (not oob),
-    }
-
-
-def render_user_strip(data, x_top):
-    """Draw the user's drag-and-drop canvas. Returns the parsed layout in
-    the original (un-rotated) frame, or None if the canvas isn't ready
-    yet. The canvas key is a hash of the rectangle set + W + a reset
-    counter, so editing data or hitting Reset re-initializes; everything
-    else keeps the iframe mounted."""
-    W = float(data["W"])
-    canvas_w, canvas_h, scale_px = _strip_pixel_size(x_top, W)
-    reset_v = st.session_state.get("user_canvas_reset_v", 0)
-    sig = (
-        tuple(int(i) for i in data["rects"]),
-        tuple(round(float(data["w"][i]), 3) for i in data["rects"]),
-        tuple(round(float(data["length"][i]), 3) for i in data["rects"]),
-        round(W, 3),
-        reset_v,
-    )
-    key = f"user_canvas_{abs(hash(sig))}"
-    initial = _initial_canvas_drawing(data, scale_px, x_top, W)
-
-    canvas_result = st_canvas(
-        fill_color="rgba(0,0,0,0)",
-        stroke_width=2,
-        stroke_color="#ffffff",
-        background_color="#f4f6fa",
-        update_streamlit=True,
-        height=canvas_h,
-        width=canvas_w,
-        drawing_mode="transform",
-        initial_drawing=initial,
-        display_toolbar=False,
-        key=key,
-    )
-
-    # Suppress streamlit-drawable-canvas's built-in "remove active object
-    # on double-click" — it would let the user accidentally delete a
-    # rectangle. A capture-phase dblclick listener on the upper-canvas
-    # stops propagation before fabric's remove handler runs. The
-    # drawable-canvas iframe mounts asynchronously; we retry briefly with
-    # backoff. Streamlit reruns re-inject this block, so the listener
-    # re-attaches if the canvas iframe ever remounts.
-    st.components.v1.html(
-        """
-        <script>
-        (function() {
-            function attach() {
-                const ifr = window.parent.document.querySelector(
-                    'iframe[src*="drawable_canvas"]'
-                );
-                if (!ifr || !ifr.contentDocument) return false;
-                const upper = ifr.contentDocument.querySelector(
-                    'canvas.upper-canvas'
-                );
-                if (!upper) return false;
-                if (!upper.__qtDblclickBlocked) {
-                    upper.__qtDblclickBlocked = true;
-                    upper.addEventListener('dblclick', function(e) {
-                        e.stopImmediatePropagation();
-                        e.preventDefault();
-                    }, true);
-                }
-                return true;
-            }
-            if (attach()) return;
-            let attempts = 0;
-            const poll = () => {
-                attempts++;
-                if (attach() || attempts > 40) return;
-                setTimeout(poll, 200);
-            };
-            setTimeout(poll, 100);
-        })();
-        </script>
-        """,
-        height=0,
-    )
-    return _parse_canvas_layout(canvas_result, scale_px, data["rects"])
-
-
 def render_optimizer_tab():
+    # Page-wide CSS for the editor steppers (tight spacing, right-aligned
+    # numbers next to the +/- buttons). Applied globally — the only place
+    # with many stacked horizontal blocks is the editor; other sections are
+    # minimally affected.
+    st.markdown(
+        """
+        <style>
+        [data-testid="stMainBlockContainer"]
+            [data-testid="stHorizontalBlock"] {
+            margin-bottom: -0.75rem;
+        }
+        [data-testid="stNumberInputContainer"] input {
+            padding-top: 0.25rem; padding-bottom: 0.25rem;
+            text-align: right; padding-right: 0.4rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     data = st.session_state.data
     optimal = st.session_state.optimal
 
+    # Feasibility floor on W: must be ≥ widest rectangle. Computed before
+    # the columns are laid out so we can clamp data["W"] if a rectangle
+    # edit bumped the floor above the current strip width.
+    rects = data["rects"]
+    min_W = (
+        max(float(data["w"][i]) for i in rects)
+        if rects else 1.0
+    )
+    current_W = float(data["W"])
+    if current_W < min_W:
+        current_W = min_W
+        data = dict(data); data["W"] = min_W
+        st.session_state.data = data
+        st.session_state["W_input"] = min_W
+
+    # ── Two-column layout: editor (left) | strip column fills remainder ──
+    # The metric column is gone — metrics now live in a sub-row above the
+    # strip, so the strip itself can stretch to the right edge of the page.
+    editor_col, strip_col = st.columns([3, 9])
+
+    # Render the editor in the left column (its edits commit + rerun on
+    # change, so we don't need a placeholder for it).
+    with editor_col:
+        _render_rect_editor(data)
+
+    # Right column: controls + metrics in one row above the strip. Solve
+    # sits on the far left, then W, then the transformation radio, then
+    # the four metric slots. The strip below renders through a placeholder
+    # so the controls in the top row can update session_state before we
+    # paint — avoids a stale-render lag.
+    with strip_col:
+        top_row = st.columns(
+            [1, 1, 3, 1, 1, 1, 1],
+            vertical_alignment="bottom",
+        )
+        with top_row[0]:
+            solve_clicked = st.button(
+                "Solve", type="primary", use_container_width=True,
+            )
+        with top_row[1]:
+            W_value = st.number_input(
+                "Strip width W",
+                min_value=min_W,
+                max_value=30.0,
+                value=current_W,
+                step=1.0,
+                format="%g",
+                key="W_input",
+                help=(
+                    "Strip width is bounded below by the widest rectangle "
+                    f"(currently {min_W:g}) — narrower would be infeasible."
+                ),
+            )
+        with top_row[2]:
+            transform_label = st.radio(
+                "GDP transformation",
+                options=list(_GDP_TRANSFORMS.keys()),
+                index=0,
+                horizontal=True,
+                key="transform_radio",
+            )
+        ub_slot = top_row[3].empty()
+        opt_slot = top_row[4].empty()
+        eff_slot = top_row[5].empty()
+        time_slot = top_row[6].empty()
+        strip_slot = st.empty()
+
+    transform_key = _GDP_TRANSFORMS[transform_label]
+
+    # Commit any change to W back into data before painting the strip.
+    if abs(float(W_value) - float(data["W"])) > 1e-12:
+        data = dict(data); data["W"] = float(W_value)
+        st.session_state.data = data
+        st.session_state.optimal = None
+        optimal = None
+
+    # Run Solve if requested. solve() returns a result dict; storing it
+    # flips session_state.optimal so the strip below renders the optimum.
+    # The spinner is rendered inside strip_slot so it shows in the strip
+    # area (which is empty while we solve), not below the editor.
+    if solve_clicked:
+        with strip_slot.container():
+            with st.spinner("Solving GDP-transformed MILP via HiGHS..."):
+                result = solve(data, transform_key)
+        st.session_state.optimal = result
+        optimal = result
+
+    # ── Fill the top-row slots with the now-current state ──────────────────
     if not data["rects"]:
-        st.info("Add at least one rectangle on the Data tab.")
+        strip_slot.info("Add at least one rectangle on the left to compute a packing.")
         return
 
-    # Shared length extent for both strips so they line up visually. The
-    # MILP's worst-case (stack everything end-to-end) is L_max = sum of
-    # length_i; that's the most space the user could conceivably need,
-    # with a small floor so a single-rect instance still has room to drag.
     L_max = float(sum(data["length"][i] for i in data["rects"])) or 1.0
     opt_L = float(optimal["L"]) if (optimal and optimal["status"] == "optimal") else None
     x_top = max(opt_L or 0.0, L_max, 12.0)
-
     area = total_area(data)
     W = float(data["W"])
+    solved = bool(optimal and optimal["status"] == "optimal")
 
-    # ── Your packing (drag-and-drop) ─────────────────────────────────────────
-    # Strip on the left, metric stack tight against its right edge, and a
-    # trailing spacer column so the metric column doesn't drift to the far
-    # side of the page (the strip is a fixed 720 px max). Title row is a
-    # flexbox so any OOB / overlap notice sits flush against the heading
-    # instead of inheriting a column's left-edge offset. The slot is
-    # filled at the bottom of this block once we know the user layout.
-    title_slot = st.empty()
+    # Strip visualization tracks the latest packing: naive cascade until
+    # the user solves, then the optimum. The inline metrics, by contrast,
+    # use consistent labels — "Upper bound" / "Optimal length" /
+    # "Efficiency" — and show "—" for solve-dependent values until then.
+    display_layout = (
+        {"x": optimal["x"], "y": optimal["y"]} if solved
+        else naive_layout(data)
+    )
+    display_L = opt_L if solved else L_max
+    opt_eff_pct = (
+        (area / (W * opt_L) * 100.0)
+        if (solved and W > 0 and opt_L and opt_L > 0)
+        else None
+    )
 
-    user_strip_col, user_metric_col, _ = st.columns([4, 1, 3])
-    with user_strip_col:
-        user_layout = render_user_strip(data, x_top)
-    user_result = _validate_user_layout(data, user_layout) if user_layout else None
-
-    with user_metric_col:
-        if user_result is not None:
-            used = user_result["used_length"]
-            if user_result["feasible"] and used > 0 and W > 0:
-                user_eff_text = f"{area / (W * used) * 100.0:.1f}%"
-            else:
-                user_eff_text = "—"
-            _render_compact_metrics([
-                ("Your length", f"{used:.3f}"),
-                ("Your efficiency", user_eff_text),
-            ])
-            if st.button("Reset your packing"):
-                st.session_state["user_canvas_reset_v"] = (
-                    st.session_state.get("user_canvas_reset_v", 0) + 1
+    with strip_slot.container():
+        _render_optimizer_strip(data, display_layout, display_L, x_top)
+        # Solver-status messages (only on non-optimal outcomes).
+        if optimal:
+            if optimal["status"] == "solver_missing":
+                st.error(optimal.get("message", "Solver missing"))
+            elif optimal["status"] == "infeasible_data":
+                st.error(optimal.get("message", "Infeasible data"))
+            elif optimal["status"] == "infeasible":
+                st.error(
+                    "Infeasible — no packing fits these rectangles in the strip."
                 )
-                st.rerun()
-        else:
-            _render_compact_metrics([
-                ("Your length", "—"),
-                ("Your efficiency", "—"),
-            ])
-
-    notice_parts = []
-    if user_result is not None:
-        if user_result["oob"]:
-            notice_parts.append(
-                "Out of strip: rectangle(s) "
-                + ", ".join(str(i) for i in user_result["oob"])
-                + f" extend past the strip width W={data['W']:.2f}."
-            )
-        if user_result["overlaps"]:
-            pairs = ", ".join(f"({a},{b})" for a, b in user_result["overlaps"])
-            notice_parts.append(f"Overlapping pairs: {pairs}.")
-    notice_html = ""
-    if notice_parts:
-        # Inline styling mirrors Streamlit's st.error look but without the
-        # full-width alert box.
-        notice_html = (
-            '<div style="background:#fff0f0;color:#7d1d1d;'
-            'padding:0.4rem 0.9rem;border-radius:0.4rem;'
-            'border:1px solid #ffcccc;font-size:0.9rem;">'
-            + " ".join(notice_parts)
-            + "</div>"
-        )
-    title_slot.markdown(
-        '<div style="display:flex;align-items:center;gap:0.75rem;'
-        'margin-bottom:0.5rem;">'
-        '<h4 style="margin:0;">Your packing</h4>'
-        + notice_html
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-
-    # ── Optimizer's packing ─────────────────────────────────────────────────
-    # Title slot mirrors the user-packing layout: heading on the left, a
-    # "Click Solve" info notice flush against it while no solution exists.
-    # Notice state depends only on whether `optimal` is set, so we can
-    # render the final title HTML up-front (no two-pass replace needed,
-    # which keeps the title stable across canvas reruns).
-    if optimal is None:
-        opt_notice_html = (
-            '<div style="background:#e7f3fe;color:#084298;'
-            'padding:0.4rem 0.9rem;border-radius:0.4rem;'
-            'border:1px solid #b6d4fe;font-size:0.9rem;">'
-            "Click <b>Solve</b> in the sidebar to compute and visualize "
-            "the optimal packing.</div>"
-        )
-    else:
-        opt_notice_html = ""
-    st.markdown(
-        '<div style="display:flex;align-items:center;gap:0.75rem;'
-        'margin:0;">'
-        "<h4 style=\"margin:0;\">Optimizer's packing</h4>"
-        + opt_notice_html
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-
-    if optimal and optimal["status"] == "optimal":
-        opt_eff = (area / (W * opt_L) * 100.0) if (W > 0 and opt_L > 0) else 0.0
-        l_text = f"{opt_L:.3f}"
-        opt_eff_text = f"{opt_eff:.1f}%"
-    else:
-        l_text = "—"
-        opt_eff_text = "—"
+            elif optimal["status"] == "unbounded":
+                st.error("Unbounded problem.")
+            elif optimal["status"] not in ("optimal", "no_rects"):
+                st.error(f"Solver returned: {optimal['status']}")
     elapsed = optimal.get("elapsed") if optimal else None
-    time_text = f"{elapsed:.2f} s" if isinstance(elapsed, (int, float)) else "—"
-
-    opt_strip_col, opt_metric_col, _ = st.columns([4, 1, 3])
-    with opt_strip_col:
-        if optimal and optimal["status"] == "optimal":
-            layout = {"x": optimal["x"], "y": optimal["y"]}
-            _render_optimizer_strip(data, layout, opt_L, x_top)
-        else:
-            _render_optimizer_strip(data, None, None, x_top)
-    with opt_metric_col:
-        _render_compact_metrics([
-            ("Optimal length", l_text),
-            ("Optimal efficiency", opt_eff_text),
-            ("Solve time", time_text),
-        ])
-
-    # Solver-status messages (only on non-optimal outcomes)
-    if optimal:
-        if optimal["status"] == "solver_missing":
-            st.error(optimal.get("message", "Solver missing"))
-        elif optimal["status"] == "infeasible_data":
-            st.error(optimal.get("message", "Infeasible data"))
-        elif optimal["status"] == "infeasible":
-            st.error("Infeasible — no packing fits these rectangles in the strip.")
-        elif optimal["status"] == "unbounded":
-            st.error("Unbounded problem.")
-        elif optimal["status"] not in ("optimal", "no_rects"):
-            st.error(f"Solver returned: {optimal['status']}")
+    ub_slot.metric("Upper bound", f"{L_max:.0f}")
+    opt_slot.metric(
+        "Optimal length",
+        f"{opt_L:.0f}" if (solved and opt_L is not None) else "—",
+    )
+    eff_slot.metric(
+        "Efficiency",
+        f"{opt_eff_pct:.1f}%" if opt_eff_pct is not None else "—",
+    )
+    time_slot.metric(
+        "Solve time",
+        f"{elapsed:.2f} s" if isinstance(elapsed, (int, float)) else "—",
+    )
 
 
+def _render_rect_editor(data):
+    """The rectangles editor — one row per rectangle with stepper inputs
+    and a delete button. Used in the left column of the Optimizer tab."""
+    st.markdown(f"#### Rectangles (max {MAX_RECTS})")
 
+    ver = st.session_state.get("_rect_editor_ver", 0)
+    _W = float(data["W"])
+    _editor_cols = [0.6, 1.6, 1.6, 0.6]
 
-def render_data_tab():
-    # Editable rectangles table. `num_rows="dynamic"` lets the user add and
-    # delete rows freely; we cap the result at MAX_RECTS.
-    data = st.session_state.data
-    st.subheader(f"Rectangles (max {MAX_RECTS})")
+    header = st.columns(_editor_cols)
+    header[0].markdown("")
+    header[1].markdown("**Width**")
+    header[2].markdown("**Length**")
+    header[3].markdown("")
 
-    df = data_to_df(data)
-    table_col, _ = st.columns([2, 3])
-    with table_col:
-        edited = st.data_editor(
-            df,
-            num_rows="dynamic",
-            width="stretch",
-            height=(len(df) + 2) * 35 + 3,
-            column_config={
-                "Index": st.column_config.NumberColumn(
-                    "i", disabled=True, format="%d",
-                    help="Rectangle index (renumbered automatically).",
-                ),
-                "Width": st.column_config.NumberColumn(
-                    "Width (w_i)", min_value=0.0, format="%.2f",
-                ),
-                "Length": st.column_config.NumberColumn(
-                    "Length (ℓ_i)", min_value=0.0, format="%.2f",
-                ),
-            },
-            key="data_editor",
+    new_data = None
+    for idx, rid in enumerate(data["rects"], start=1):
+        cols = st.columns(_editor_cols, vertical_alignment="center")
+        color = _PALETTE[(int(idx) - 1) % len(_PALETTE)]
+        cols[0].markdown(
+            f'<div style="display:inline-flex;align-items:center;'
+            f'justify-content:center;width:1.6rem;height:1.6rem;'
+            f'border-radius:0.3rem;background:{color};color:#fff;'
+            f'font-weight:700;font-size:0.85rem;">{idx}</div>',
+            unsafe_allow_html=True,
         )
-
-    # Validate / report on the edited table.
-    warnings = []
-    if len(edited) > MAX_RECTS:
-        warnings.append(
-            f"Capped at {MAX_RECTS} rectangles; extra rows ignored "
-            "(Big-M MILP gets slow beyond this)."
+        new_w = cols[1].number_input(
+            "Width", min_value=1.0, max_value=_W, step=1.0, format="%g",
+            value=float(data["w"][rid]),
+            key=f"w_{rid}_{ver}",
+            label_visibility="collapsed",
         )
-        edited = edited.head(MAX_RECTS)
-
-    new_data = df_to_data(edited, data["W"])
-
-    # Per-rectangle width and positivity warnings, surfaced from the cleaned
-    # data (so they don't fire on rows the user is still editing).
-    too_wide = [i for i in new_data["rects"] if new_data["w"][i] > new_data["W"] + 1e-9]
-    if too_wide:
-        warnings.append(
-            f"Rectangle(s) {too_wide} are wider than the strip "
-            f"(W = {new_data['W']:g}); the problem will be infeasible."
+        new_l = cols[2].number_input(
+            "Length", min_value=1.0, max_value=30.0, step=1.0, format="%g",
+            value=float(data["length"][rid]),
+            key=f"l_{rid}_{ver}",
+            label_visibility="collapsed",
         )
-
-    raw_invalid = (
-        (pd.to_numeric(edited["Width"], errors="coerce") <= 0)
-        | (pd.to_numeric(edited["Length"], errors="coerce") <= 0)
-    ).any()
-    if raw_invalid:
-        warnings.append(
-            "Rows with non-positive width or length were dropped."
+        delete_clicked = cols[3].button(
+            "🗑", key=f"del_{rid}_{ver}",
+            help=f"Delete rectangle {idx}",
         )
+        if delete_clicked:
+            st.session_state.data = remove_rect(dict(data), rid)
+            st.session_state.optimal = None
+            st.rerun()
+        if new_w != data["w"][rid] or new_l != data["length"][rid]:
+            new_data = dict(data)
+            new_data["w"] = dict(new_data["w"]); new_data["w"][rid] = new_w
+            new_data["length"] = dict(new_data["length"]); new_data["length"][rid] = new_l
 
-    # If the cleaned data differs from what we had, commit it to state and
-    # rerun so other tabs see the change. Invalidate any prior solver result.
-    if new_data != st.session_state.data:
+    if new_data is not None:
         st.session_state.data = new_data
         st.session_state.optimal = None
         st.rerun()
 
-    for w in warnings:
-        st.warning(w)
-
-    # Reset uses the deferred-flag pattern documented in `init_state`.
-    if st.button("Reset to defaults"):
-        st.session_state["_pending_reset"] = True
-        st.rerun()
+    can_add = len(data["rects"]) < MAX_RECTS
+    # Buttons share the editor's column structure so Add rectangle aligns
+    # with the Width column and Reset to defaults aligns with Length.
+    btn_cols = st.columns(_editor_cols)
+    with btn_cols[1]:
+        if st.button(
+            "➕ Add rectangle",
+            key="rects_add",
+            disabled=not can_add,
+            help=(
+                None
+                if can_add
+                else f"Max {MAX_RECTS} rectangles (Big-M MILP gets slow beyond this)."
+            ),
+        ):
+            st.session_state.data = add_rect(dict(data))
+            st.session_state.optimal = None
+            st.rerun()
+    with btn_cols[2]:
+        if st.button(
+            "Reset to defaults",
+            key="rects_reset",
+            help="Restore the default instance.",
+        ):
+            st.session_state["_pending_reset"] = True
+            st.rerun()
 
 
 def render_formulation_tab():
@@ -959,12 +737,30 @@ $$
             "relaxation is the convex hull of the feasible region — typically "
             "tighter and faster on harder instances."
         )
+        st.markdown(
+            "- **Multiple Big-M**: the same shape as Big-M, but each "
+            "constraint gets its own per-constraint $M$ rather than sharing "
+            "one large global constant. Each $M$ is computed tight to that "
+            "constraint from the variable bounds, so the LP relaxation is "
+            "tighter than single-$M$ without growing the variable count the "
+            "way Hull does — usually a midpoint between the two."
+        )
+        st.markdown(
+            "- **Cutting Plane**: starts from the Big-M reformulation and "
+            "iteratively solves its LP relaxation; each LP solution that "
+            "lies outside the convex hull is separated by adding a violated "
+            "hull facet as a new cut. The process repeats until the relaxed "
+            "solution is inside the hull (up to tolerance), so the final "
+            "model approaches Hull's tightness while keeping Big-M's smaller "
+            "variable count. Setup is the most expensive of the four; the "
+            "tighter relaxation can still pay off on hard instances."
+        )
 
     with sub_instance:
         st.subheader("Instance Summary")
         data = st.session_state.data
         if not data["rects"]:
-            st.info("Add at least one rectangle on the Data tab.")
+            st.info("Add at least one rectangle on the Optimizer tab.")
             return
 
         N = len(data["rects"])
@@ -1020,7 +816,7 @@ $$
 def render_logs_tab():
     optimal = st.session_state.optimal
     if not optimal:
-        st.info("Click **Solve** in the sidebar to see solver logs.")
+        st.info("Click **Solve** on the Optimizer tab to see solver logs.")
         return
 
     tx = optimal.get("transform")
@@ -1046,22 +842,19 @@ st.set_page_config(
     page_title="Strip Packing GDP Optimizer",
     page_icon="favicon.png",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
 # Initialize session_state defaults and apply any pending reset.
 init_state()
 
-# Tighten the top of the main block so the title sits closer to the page top
-# and the tabs are visible without scrolling. Same value used by the other
-# apps; smaller numbers hide the title under Streamlit's sticky header.
+# Fixed-corner home logo (no sidebar in this app — all controls are inline
+# on the Optimizer tab). Same pattern as the diet and knapsack apps.
+_FAVICON_DATA_URL = "data:image/png;base64," + base64.b64encode(
+    (Path(__file__).parent / "favicon.png").read_bytes()
+).decode()
 st.markdown(
     """
     <style>
-    section[data-testid="stSidebar"] {
-        user-select: none;
-        -webkit-user-select: none;
-    }
     .home-logo-corner {
         position: fixed;
         top: 0.5rem;
@@ -1081,73 +874,13 @@ st.markdown(
         padding-top: 2.5rem !important;
     }
     </style>
-    """,
+    """
+    f'<a href="https://griffith-pse.com" target="_self" '
+    f'class="home-logo-corner">'
+    f'<img src="{_FAVICON_DATA_URL}" alt="Griffith PSE — home" />'
+    f"</a>",
     unsafe_allow_html=True,
 )
-
-# Home link: clicking the Griffith PSE logo navigates back to the portfolio
-# site. Same-tab navigation since the user is leaving the demo. Lives at the
-# top of the sidebar (the upper-left of the page when expanded), matching the
-# quad-tank pattern. Image is embedded from the local favicon.png as a base64
-# data URL — the link still navigates to griffith-pse.com when clicked, but
-# loading the page itself doesn't make any third-party request.
-_FAVICON_DATA_URL = "data:image/png;base64," + base64.b64encode(
-    (Path(__file__).parent / "favicon.png").read_bytes()
-).decode()
-st.sidebar.markdown(
-    f'<a class="home-logo-corner" href="https://griffith-pse.com" target="_self">'
-    f'<img src="{_FAVICON_DATA_URL}" '
-        f'alt="Griffith PSE — home" />'
-    f'</a>',
-    unsafe_allow_html=True,
-)
-
-# ── Sidebar inputs ────────────────────────────────────────────────────────────
-st.sidebar.header("Inputs")
-
-# Strip width W. The number_input is bound to `W_input` in session_state so
-# `apply_reset` can seed it after a Reset.
-W_value = st.sidebar.number_input(
-    "Strip width W",
-    min_value=0.1,
-    value=float(st.session_state.data["W"]),
-    step=0.5,
-    format="%.2f",
-    key="W_input",
-)
-
-# GDP transformation choice. The four reformulations route through pyomo.gdp
-# and produce different MILPs; the Optimizer tab reports the solve time so
-# the user can compare them head-to-head.
-transform_label = st.sidebar.radio(
-    "GDP transformation",
-    options=list(_GDP_TRANSFORMS.keys()),
-    index=0,
-    key="transform_radio",
-    help=(
-        "Big-M: classical linearization with a single large constant per "
-        "disjunct — fewest variables, loosest LP relaxation. "
-        "Hull: disaggregated copies of the variables; tighter relaxation. "
-        "Multiple Big-M: a per-constraint tight Big-M, usually between the "
-        "two. "
-        "Cutting Plane: starts from Big-M and iteratively adds violated "
-        "hull facets — can be slow but gives the tightest formulation."
-    ),
-)
-transform_key = _GDP_TRANSFORMS[transform_label]
-
-# Commit any change to W back to the data dict so downstream renders see it.
-if abs(float(W_value) - float(st.session_state.data["W"])) > 1e-12:
-    new_data = dict(st.session_state.data)
-    new_data["W"] = float(W_value)
-    st.session_state.data = new_data
-    st.session_state.optimal = None
-
-# Solve button. MILP can be slow for many rectangles, so it's explicit rather
-# than auto-running on every state change.
-if st.sidebar.button("Solve", type="primary", use_container_width=True):
-    with st.spinner("Solving GDP-transformed MILP via HiGHS..."):
-        st.session_state.optimal = solve(st.session_state.data, transform_key)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown(
@@ -1164,28 +897,25 @@ st.markdown(
     "</h2>",
     unsafe_allow_html=True,
 )
-_caption_col, _ = st.columns([1, 1])
+_caption_col, _ = st.columns([5, 3])
 with _caption_col:
     st.markdown(
         "Pack $N$ rectangles into a strip of fixed width $W$ to minimize "
-        "the strip length $L$. Drag rectangles in **Your packing** to try "
-        "your own layout. Non-overlap is written as **disjunctions** "
-        "(`pyomo.gdp`) and reformulated to a MILP — pick a transformation "
-        "(Big-M, Hull, Multiple Big-M, Cutting Plane) in the sidebar and "
-        "click **Solve** to see the optimum. Edit instances in the "
-        "**Data** tab; **Formulation** and **Logs** show the underlying "
-        "GDP and solver output."
+        "the strip length $L$. Edit the rectangle list directly on the "
+        "Optimizer tab, pick a GDP transformation (Big-M, Hull, Multiple "
+        "Big-M, Cutting Plane) below, and click **Solve**. "
+        "Non-overlap is written as **disjunctions** (`pyomo.gdp`) and "
+        "reformulated to a MILP for HiGHS. The **Formulation** and "
+        "**Logs** tabs show the underlying GDP and solver output."
     )
 
-# Four tabs for the four views of the problem.
-optimizer_tab, data_tab, formulation_tab, logs_tab = st.tabs(
-    ["📦 Optimizer", "📋 Data", "📐 Formulation", "📜 Logs"]
+# Three tabs for the three views of the problem.
+optimizer_tab, formulation_tab, logs_tab = st.tabs(
+    ["📦 Optimizer", "📐 Formulation", "📜 Logs"]
 )
 
 with optimizer_tab:
     render_optimizer_tab()
-with data_tab:
-    render_data_tab()
 with formulation_tab:
     render_formulation_tab()
 with logs_tab:
