@@ -28,7 +28,7 @@
 #   3. Utilities    — rectangle add/delete + geometry helpers.
 #   4. LaTeX        — render the general formulation and instance summary.
 #   5. Tabs         — render_optimizer / render_formulation / render_logs.
-#   6. Main         — page config, sidebar, tab assembly.
+#   6. Main         — page config, corner-logo CSS, header/caption, 3 tabs.
 # =============================================================================
 
 import base64
@@ -58,10 +58,11 @@ DEFAULT_DATA = {
     "W": 10.0,
 }
 
-# GDP → MILP transformations exposed in the sidebar. Big-M and Hull are the
-# classical pair; mbigm uses a per-constraint tight Big-M and Cutting Plane
-# iteratively tightens a Big-M base with violated facets of the hull. All
-# four are TransformationFactory entries in pyomo.gdp.
+# GDP → MILP transformations offered via the radio above the strip on the
+# Optimizer tab. Big-M and Hull are the classical pair; mbigm uses a per-
+# constraint tight Big-M and Cutting Plane iteratively tightens a Big-M
+# base with violated facets of the hull. All four are TransformationFactory
+# entries in pyomo.gdp.
 _GDP_TRANSFORMS = {
     "Big-M": "gdp.bigm",
     "Hull": "gdp.hull",
@@ -242,12 +243,15 @@ def solve(data, transform="gdp.bigm"):
 #
 # Streamlit re-executes the whole script on every interaction. Anything that
 # must persist between runs lives in `st.session_state`. The keys we use:
-#   - data:                the current problem instance (rects, w, h, W)
+#   - data:                the current problem instance (rects, w, length, W)
 #   - optimal:             the most recent solver result, or None
 #   - _pending_reset:      one-shot flag to reset on the next run
-#   - W_input:             the value backing the sidebar number_input
-#   - transform_radio:     the value backing the sidebar radio
-#   - data_editor:         backing key for the data editor widget
+#   - W_input:             value backing the inline strip-width number_input
+#   - transform_radio:     value backing the inline GDP-transformation radio
+#   - _rect_editor_ver:    counter bumped on Reset so per-rectangle stepper
+#                          widget keys re-init instead of holding stale state
+#   - w_{rid}_{ver} / l_{rid}_{ver} / del_{rid}_{ver}:
+#                          per-row stepper / delete-button widget keys
 
 def init_state():
     # Idempotent initialization: only seed defaults the first time, otherwise
@@ -330,8 +334,9 @@ def naive_layout(data):
 
 # ---------- Tabs ----------
 #
-# One render_* function per tab. Optimizer is the main view; Data lets the
-# user edit rectangles; Formulation shows the math; Logs shows HiGHS output.
+# One render_* function per tab. Optimizer is the main view (rectangle
+# editor on the left, strip + controls + metrics on the right); Formulation
+# shows the math; Logs shows HiGHS output.
 
 # A 12-color categorical palette repeated as needed. Tableau-style; reads
 # well at small rectangle sizes and keeps adjacent indices distinguishable.
@@ -346,9 +351,7 @@ def _render_optimizer_strip(data, layout, L, x_top):
     inside a responsive container. The container's width fills its parent
     column (100%) and its aspect ratio is locked to x_top:W via the
     `aspect-ratio` CSS property, so percentage-based child positions stay
-    geometrically accurate as the column resizes. Rectangles are drawn as
-    plain divs (rather than Altair marks) so the rendering is independent
-    of any chart-padding shrinkage."""
+    geometrically accurate as the column resizes."""
     rects = data["rects"]
     W = float(data["W"])
     if x_top <= 0 or W <= 0:
@@ -836,7 +839,8 @@ def render_logs_tab():
 #
 # Module-level code runs on every Streamlit rerun, so this section needs to
 # be cheap and idempotent: configure the page, ensure session_state is set
-# up, draw the sidebar, then assemble the four tabs.
+# up, inject the fixed-corner home-logo CSS, render the header/caption,
+# then assemble the three tabs.
 
 st.set_page_config(
     page_title="Strip Packing GDP Optimizer",
