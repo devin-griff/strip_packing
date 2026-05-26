@@ -60,14 +60,12 @@ DEFAULT_DATA = {
 
 # GDP → MILP transformations offered via the radio above the strip on the
 # Optimizer tab. Big-M and Hull are the classical pair; mbigm uses a per-
-# constraint tight Big-M and Cutting Plane iteratively tightens a Big-M
-# base with violated facets of the hull. All four are TransformationFactory
-# entries in pyomo.gdp.
+# constraint tight Big-M, midway between the two. All three are
+# TransformationFactory entries in pyomo.gdp.
 _GDP_TRANSFORMS = {
     "Big-M": "gdp.bigm",
     "Hull": "gdp.hull",
     "Multiple Big-M": "gdp.mbigm",
-    "Cutting Plane": "gdp.cuttingplane",
 }
 _GDP_LABEL = {v: k for k, v in _GDP_TRANSFORMS.items()}
 
@@ -150,12 +148,11 @@ def _solve_capturing(m, transform):
     on older). HiGHS via the appsi_highs LegacySolver doesn't support a
     logfile= kwarg, so the FD capture is the only path. `elapsed` is the
     wall-clock time of transformation + solve, in seconds — shown as a
-    metric on the Optimizer tab so users can compare the four GDP
+    metric on the Optimizer tab so users can compare the three GDP
     reformulations head-to-head."""
     # Reformulate the GDP into a standard MILP. Big-M / Multiple Big-M use a
     # linearization with a large constant; Hull adds disaggregated copies of
-    # the variables but tends to give tighter relaxations; Cutting Plane
-    # iteratively adds violated facets of the hull to a Big-M base.
+    # the variables but tends to give tighter relaxations.
     t0 = time.perf_counter()
     pyo.TransformationFactory(transform).apply_to(m)
 
@@ -748,17 +745,6 @@ $$
             "tighter than single-$M$ without growing the variable count the "
             "way Hull does — usually a midpoint between the two."
         )
-        st.markdown(
-            "- **Cutting Plane**: starts from the Big-M reformulation and "
-            "iteratively solves its LP relaxation; each LP solution that "
-            "lies outside the convex hull is separated by adding a violated "
-            "hull facet as a new cut. The process repeats until the relaxed "
-            "solution is inside the hull (up to tolerance), so the final "
-            "model approaches Hull's tightness while keeping Big-M's smaller "
-            "variable count. Setup is the most expensive of the four; the "
-            "tighter relaxation can still pay off on hard instances."
-        )
-
         st.markdown("**References**")
         st.markdown(
             "[1] Q. Chen, E. S. Johnson, D. E. Bernal, R. Valentin, S. Kale, "
@@ -783,21 +769,13 @@ $$
             "2012. [ACS](https://pubs.acs.org/doi/10.1021/ie2030486)"
         )
         st.markdown(
-            "[4] N. W. Sawaya and I. E. Grossmann, "
-            '"A cutting plane method for solving linear generalized '
-            'disjunctive programming problems," in *Computer Aided Chemical '
-            "Engineering: Process Systems Engineering 2003*, Elsevier, "
-            "pp. 1032–1037, 2003. "
-            "[ScienceDirect](https://www.sciencedirect.com/science/chapter/bookseries/abs/pii/S1570794603804443)"
-        )
-        st.markdown(
-            "[5] Q. Huangfu and J. A. J. Hall, "
+            "[4] Q. Huangfu and J. A. J. Hall, "
             '"Parallelizing the dual revised simplex method," *Mathematical '
             "Programming Computation*, vol. 10, no. 1, pp. 119–142, 2018. "
             "[Springer](https://link.springer.com/article/10.1007/s12532-017-0130-5)"
         )
         st.markdown(
-            "[6] M. L. Bynum, G. A. Hackebeil, W. E. Hart, C. D. Laird, "
+            "[5] M. L. Bynum, G. A. Hackebeil, W. E. Hart, C. D. Laird, "
             "B. L. Nicholson, J. D. Siirola, J.-P. Watson, and D. L. Woodruff, "
             "*Pyomo — Optimization Modeling in Python*, 3rd ed. "
             "Cham: Springer, 2021. "
@@ -856,8 +834,7 @@ $$
             st.caption(
                 f"This is one of the {n_disj} pairwise disjunctions in the "
                 f"model. The GDP transformation rewrites each one into a "
-                f"set of standard MILP constraints (Big-M / Hull / mbigm / "
-                f"Cutting Plane)."
+                f"set of standard MILP constraints (Big-M / Hull / mbigm)."
             )
 
 
@@ -952,7 +929,7 @@ with _caption_col:
         "Pack $N$ rectangles into a strip of fixed width $W$ to minimize "
         "the strip length $L$. Edit the rectangle list directly on the "
         "Optimizer tab, pick a GDP transformation (Big-M, Hull, Multiple "
-        "Big-M, Cutting Plane) below, and click **Solve**. "
+        "Big-M) below, and click **Solve**. "
         "Non-overlap is written as **disjunctions** (`pyomo.gdp`) and "
         "reformulated to a MILP for HiGHS. The **Formulation** and "
         "**Logs** tabs show the underlying GDP and solver output."
