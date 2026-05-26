@@ -35,6 +35,7 @@ import base64
 import contextlib
 import copy
 import io
+import math
 import time
 from pathlib import Path
 
@@ -142,6 +143,18 @@ def build_model(data):
     return m
 
 
+# Hard cap on the HiGHS master solve. Large instances (especially with
+# Big-M on N close to MAX_RECTS) can take much longer than this in the
+# worst case; cutting off at 10 s keeps the UI responsive and surfaces
+# the optimality gap when the solver doesn't converge.
+SOLVE_TIME_LIMIT_S = 10.0
+
+# Below this relative gap, treat the solve as effectively optimal (the
+# default HiGHS MIP gap tolerance is 0.01% = 1e-4; we use a tiny bit
+# higher to absorb floating-point noise).
+GAP_OPTIMAL_THRESHOLD_PCT = 0.05
+
+
 def _ensure_pyomo_thread_locals():
     """Workaround for a Pyomo bug. pyomo/gdp/plugins/multiple_bigm.py's
     `_apply_to` opens with `if _thread_local.in_progress: raise ...`
@@ -185,10 +198,34 @@ def _solve_capturing(m, transform):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         solver = pyo.SolverFactory("appsi_highs")
+        solver.options["time_limit"] = SOLVE_TIME_LIMIT_S
         results = solver.solve(m, tee=True)
     log_text = buf.getvalue()
     elapsed = time.perf_counter() - t0
     return results, log_text, elapsed
+
+
+def _extract_gap_pct(results):
+    """Pull the relative optimality gap (in percent) out of a legacy
+    Pyomo Results object. Returns `None` if the bounds aren't both
+    available — e.g. if HiGHS hit the time limit without a feasible
+    incumbent, or for solver backends that don't populate the
+    problem-level bound fields. (The values returned by `problem[k]`
+    are plain floats despite the docs sometimes describing them as
+    ScalarData wrappers.)"""
+    try:
+        problem = results.problem[0]
+        primal = float(problem["Upper bound"])
+        dual = float(problem["Lower bound"])
+    except Exception:
+        return None
+    # Guard against unbounded / degenerate values (Pyomo emits ±inf for
+    # missing bounds on some paths).
+    if not (math.isfinite(primal) and math.isfinite(dual)):
+        return None
+    if primal <= 1e-10:
+        return None
+    return max(0.0, (primal - dual) / primal * 100.0)
 
 
 def solve(data, transform="gdp.bigm"):
@@ -231,15 +268,42 @@ def solve(data, transform="gdp.bigm"):
         }
 
     # Translate Pyomo's TerminationCondition enum into a small set of stable
-    # status strings the UI knows how to render.
+    # status strings the UI knows how to render. With a time limit set, the
+    # solver may return `maxTimeLimit` carrying a best-known feasible
+    # incumbent — treated as a "feasible" status so the UI still draws the
+    # packing, with the gap surfaced separately.
     tc = results.solver.termination_condition
-    if tc == TerminationCondition.optimal:
+    gap_pct = _extract_gap_pct(results)
+
+    def _extract_layout():
+        """Pull x, y, L off the model. May raise if the solver returned
+        no feasible solution (variables still hold their initial values
+        or are stale)."""
         x = {i: float(pyo.value(m.x[i])) for i in data["rects"]}
         y = {i: float(pyo.value(m.y[i])) for i in data["rects"]}
         L = float(pyo.value(m.L))
+        return x, y, L
+
+    if tc == TerminationCondition.optimal:
+        x, y, L = _extract_layout()
         return {
             "status": "optimal",
-            "x": x, "y": y, "L": L,
+            "x": x, "y": y, "L": L, "gap_pct": gap_pct,
+            "log": log, "transform": transform, "elapsed": elapsed,
+        }
+    if tc == TerminationCondition.maxTimeLimit:
+        # Feasible incumbent expected (the LP root is always feasible for
+        # this problem). If the bounds tell us a finite primal exists,
+        # extract the layout and surface the gap.
+        try:
+            x, y, L = _extract_layout()
+        except Exception:
+            return {"status": "no_incumbent", "x": {}, "y": {}, "L": None,
+                    "gap_pct": gap_pct, "log": log, "transform": transform,
+                    "elapsed": elapsed}
+        return {
+            "status": "time_limit",
+            "x": x, "y": y, "L": L, "gap_pct": gap_pct,
             "log": log, "transform": transform, "elapsed": elapsed,
         }
     if tc in (
@@ -247,11 +311,14 @@ def solve(data, transform="gdp.bigm"):
         TerminationCondition.infeasibleOrUnbounded,
     ):
         return {"status": "infeasible", "x": {}, "y": {}, "L": None,
+                "gap_pct": None,
                 "log": log, "transform": transform, "elapsed": elapsed}
     if tc == TerminationCondition.unbounded:
         return {"status": "unbounded", "x": {}, "y": {}, "L": None,
+                "gap_pct": None,
                 "log": log, "transform": transform, "elapsed": elapsed}
     return {"status": str(tc), "x": {}, "y": {}, "L": None,
+            "gap_pct": gap_pct,
             "log": log, "transform": transform, "elapsed": elapsed}
 
 
@@ -479,8 +546,11 @@ def render_optimizer_tab():
     # so the controls in the top row can update session_state before we
     # paint — avoids a stale-render lag.
     with strip_col:
+        # Six metric slots after the controls: title room shrinks one
+        # column-unit to make room for Gap. Order matches the user's
+        # mental flow: bounds → result → quality → optimality → time.
         top_row = st.columns(
-            [1, 1, 3, 1, 1, 1, 1],
+            [1, 1, 3, 1, 1, 1, 1, 1],
             vertical_alignment="bottom",
         )
         with top_row[0]:
@@ -512,7 +582,8 @@ def render_optimizer_tab():
         ub_slot = top_row[3].empty()
         opt_slot = top_row[4].empty()
         eff_slot = top_row[5].empty()
-        time_slot = top_row[6].empty()
+        gap_slot = top_row[6].empty()
+        time_slot = top_row[7].empty()
         strip_slot = st.empty()
 
     transform_key = _GDP_TRANSFORMS[transform_label]
@@ -541,30 +612,50 @@ def render_optimizer_tab():
         return
 
     L_max = float(sum(data["length"][i] for i in data["rects"])) or 1.0
-    opt_L = float(optimal["L"]) if (optimal and optimal["status"] == "optimal") else None
+    # A result counts as "renderable" if HiGHS returned an incumbent —
+    # either a proven optimum, or a best-feasible found when the time
+    # limit fired. Both populate x / y / L on the result dict.
+    has_incumbent = bool(
+        optimal and optimal["status"] in ("optimal", "time_limit")
+    )
+    opt_L = float(optimal["L"]) if has_incumbent else None
+    gap_pct = optimal.get("gap_pct") if optimal else None
+    # "Proved optimal" drives the metric label: HiGHS marked it optimal,
+    # OR the bound gap is below the noise floor (e.g. solver terminated
+    # at time-limit but already had a near-zero gap).
+    proved_optimal = bool(
+        optimal
+        and (
+            optimal["status"] == "optimal"
+            or (gap_pct is not None and gap_pct < GAP_OPTIMAL_THRESHOLD_PCT)
+        )
+    )
     x_top = max(opt_L or 0.0, L_max, 12.0)
     area = total_area(data)
     W = float(data["W"])
-    solved = bool(optimal and optimal["status"] == "optimal")
 
     # Strip visualization tracks the latest packing: naive cascade until
-    # the user solves, then the optimum. The inline metrics, by contrast,
-    # use consistent labels — "Upper bound" / "Optimal length" /
-    # "Efficiency" — and show "—" for solve-dependent values until then.
+    # the user solves, then the incumbent (proven optimum or
+    # best-feasible from a time-limited run). Metric labels use stable
+    # text — "Upper bound" / "Optimal length" or "Best length" /
+    # "Efficiency" / "Gap" / "Solve time" — and show "—" for
+    # solve-dependent values until then.
     display_layout = (
-        {"x": optimal["x"], "y": optimal["y"]} if solved
+        {"x": optimal["x"], "y": optimal["y"]} if has_incumbent
         else naive_layout(data)
     )
-    display_L = opt_L if solved else L_max
-    opt_eff_pct = (
+    display_L = opt_L if has_incumbent else L_max
+    eff_pct = (
         (area / (W * opt_L) * 100.0)
-        if (solved and W > 0 and opt_L and opt_L > 0)
+        if (has_incumbent and W > 0 and opt_L and opt_L > 0)
         else None
     )
 
     with strip_slot.container():
         _render_optimizer_strip(data, display_layout, display_L, x_top)
-        # Solver-status messages (only on non-optimal outcomes).
+        # Solver-status messages (only on terminal-failure outcomes).
+        # We DON'T render a status caption for "time_limit" — the Gap
+        # metric tells that story without nagging under the strip.
         if optimal:
             if optimal["status"] == "solver_missing":
                 st.error(optimal.get("message", "Solver missing"))
@@ -576,18 +667,41 @@ def render_optimizer_tab():
                 )
             elif optimal["status"] == "unbounded":
                 st.error("Unbounded problem.")
-            elif optimal["status"] not in ("optimal", "no_rects"):
+            elif optimal["status"] == "no_incumbent":
+                st.warning(
+                    f"Hit the {SOLVE_TIME_LIMIT_S:g} s solve cap before "
+                    "finding any feasible packing. Try a smaller instance "
+                    "or a different transformation."
+                )
+            elif optimal["status"] not in ("optimal", "time_limit", "no_rects"):
                 st.error(f"Solver returned: {optimal['status']}")
     elapsed = optimal.get("elapsed") if optimal else None
+
     ub_slot.metric("Upper bound", f"{L_max:.0f}")
-    opt_slot.metric(
-        "Optimal length",
-        f"{opt_L:.0f}" if (solved and opt_L is not None) else "—",
-    )
+    if proved_optimal:
+        opt_slot.metric("Optimal length", f"{opt_L:.0f}")
+    elif has_incumbent:
+        opt_slot.metric(
+            "Best length",
+            f"{opt_L:.0f}",
+            help=(
+                f"Solver hit the {SOLVE_TIME_LIMIT_S:g} s time cap before "
+                "proving optimality. This is the best feasible packing "
+                "found so far; see Gap for how far it could still tighten."
+            ),
+        )
+    else:
+        opt_slot.metric("Optimal length", "—")
     eff_slot.metric(
         "Efficiency",
-        f"{opt_eff_pct:.1f}%" if opt_eff_pct is not None else "—",
+        f"{eff_pct:.1f}%" if eff_pct is not None else "—",
     )
+    if gap_pct is None:
+        gap_slot.metric("Gap", "—")
+    elif gap_pct < GAP_OPTIMAL_THRESHOLD_PCT:
+        gap_slot.metric("Gap", "0.0%")
+    else:
+        gap_slot.metric("Gap", f"{gap_pct:.1f}%")
     time_slot.metric(
         "Solve time",
         f"{elapsed:.2f} s" if isinstance(elapsed, (int, float)) else "—",
@@ -771,8 +885,12 @@ $$
             "branch-and-bound: relax the binary disjunct indicators $z_k$ to "
             "$[0, 1]$, solve the resulting LP, and either accept the solution "
             "if all indicators are integer or branch on the most fractional "
-            "one. HiGHS is a modern open-source LP/MILP solver from "
-            "Edinburgh's ERGO group, distributed as a pip wheel via `highspy`."
+            "one. The solver is capped at 10 s — if it can't prove optimality "
+            "in that time, the Optimizer tab labels the result **Best length** "
+            "instead of *Optimal length* and surfaces the remaining "
+            "optimality **Gap**. HiGHS is a modern open-source LP/MILP solver "
+            "from Edinburgh's ERGO group, distributed as a pip wheel via "
+            "`highspy`."
         )
         st.markdown(
             "See the [companion Jupyter notebook]"
