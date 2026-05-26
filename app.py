@@ -207,21 +207,47 @@ def _solve_capturing(m, transform):
         # call m.solutions.load_from(results) below only if the primal
         # bound is finite — i.e. a feasible incumbent actually exists.
         results = solver.solve(m, tee=True, load_solutions=False)
-        try:
-            primal = float(results.problem[0].get("Upper bound", float("inf")))
-        except Exception:
-            primal = float("inf")
-        if math.isfinite(primal):
-            try:
-                m.solutions.load_from(results)
-            except Exception:
-                # Belt-and-suspenders: if load_from itself fails on a
-                # quirky results format, fall through to the no-load
-                # path and let the caller report `no_incumbent`.
-                pass
+        _load_solution_if_present(m, results)
     log_text = buf.getvalue()
     elapsed = time.perf_counter() - t0
     return results, log_text, elapsed
+
+
+def _load_solution_if_present(m, results):
+    """Best-effort copy of the solver's solution onto the model. Tries
+    two paths because `m.solutions.load_from(results)` has shown
+    intermittent behavior across Pyomo versions when paired with
+    appsi_highs's Results object (works on 6.8.x in local testing,
+    appears to no-op on 6.10.x in production).
+
+    Path 1: the legacy `m.solutions.load_from(results)` — works when
+    Pyomo's solution adapter understands the appsi_highs Results
+    format. Path 2: walk `results.solution[0]['Variable']` directly
+    and assign values via `m.find_component(name).value = v`. Both are
+    wrapped in try/except so a failure on either path leaves the
+    model variables unset rather than raising; the caller's
+    `_extract_layout()` then surfaces the `no_incumbent` status."""
+    # Path 1: legacy load_from
+    try:
+        m.solutions.load_from(results)
+    except Exception:
+        pass
+    # If path 1 worked, m.L.value is now populated. Otherwise fall
+    # through to the explicit walk.
+    if m.L.value is not None:
+        return
+    # Path 2: manual walk
+    try:
+        var_dict = results.solution[0]["Variable"]
+    except Exception:
+        return
+    for var_name, val_dict in var_dict.items():
+        try:
+            var = m.find_component(var_name)
+            if var is not None and "Value" in val_dict:
+                var.value = val_dict["Value"]
+        except Exception:
+            continue
 
 
 def _extract_gap_pct(results):
@@ -304,7 +330,18 @@ def solve(data, transform="gdp.bigm"):
         return x, y, L
 
     if tc == TerminationCondition.optimal:
-        x, y, L = _extract_layout()
+        # Even on optimal termination, _extract_layout can raise if
+        # m.solutions.load_from(results) silently failed upstream (the
+        # appsi_highs <-> legacy Results adapter has shipped buggy
+        # versions where the load step is a no-op). Catch that here so
+        # the page surfaces a "no incumbent" warning instead of
+        # crashing with ValueError.
+        try:
+            x, y, L = _extract_layout()
+        except Exception:
+            return {"status": "no_incumbent", "x": {}, "y": {}, "L": None,
+                    "gap_pct": gap_pct, "log": log, "transform": transform,
+                    "elapsed": elapsed}
         return {
             "status": "optimal",
             "x": x, "y": y, "L": L, "gap_pct": gap_pct,
