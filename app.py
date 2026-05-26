@@ -199,7 +199,26 @@ def _solve_capturing(m, transform):
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         solver = pyo.SolverFactory("appsi_highs")
         solver.options["time_limit"] = SOLVE_TIME_LIMIT_S
+        # When HiGHS hits the time cap without finding any feasible
+        # solution (e.g. Hull on N=15), the default load path inside
+        # appsi_highs raises RuntimeError because there's nothing to
+        # load. Suppress the auto-load and manually load below only if
+        # the primal bound is finite (i.e., a feasible incumbent
+        # exists).
+        solver.options["load_solution"] = False
         results = solver.solve(m, tee=True)
+        try:
+            primal = float(results.problem[0].get("Upper bound", float("inf")))
+        except Exception:
+            primal = float("inf")
+        if math.isfinite(primal):
+            try:
+                m.solutions.load_from(results)
+            except Exception:
+                # Belt-and-suspenders: if load_from itself fails on a
+                # quirky results format, fall through to the no-load
+                # path and let the caller report `no_incumbent`.
+                pass
     log_text = buf.getvalue()
     elapsed = time.perf_counter() - t0
     return results, log_text, elapsed
