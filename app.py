@@ -173,10 +173,14 @@ def _solve_capturing(m, transform):
     reformulations head-to-head."""
     # Reformulate the GDP into a standard MILP. Big-M / Multiple Big-M use a
     # linearization with a large constant; Hull adds disaggregated copies of
-    # the variables but tends to give tighter relaxations.
+    # the variables but tends to give tighter relaxations. Multiple Big-M
+    # additionally solves LP subproblems to tighten each per-constraint M;
+    # we point those subproblems at HiGHS (default is Gurobi, which we don't
+    # ship in the image).
     _ensure_pyomo_thread_locals()
     t0 = time.perf_counter()
-    pyo.TransformationFactory(transform).apply_to(m)
+    apply_kwargs = {"solver": "appsi_highs"} if transform == "gdp.mbigm" else {}
+    pyo.TransformationFactory(transform).apply_to(m, **apply_kwargs)
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
