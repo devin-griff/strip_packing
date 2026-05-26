@@ -32,14 +32,15 @@
 # =============================================================================
 
 import base64
+import contextlib
 import copy
+import io
 import time
 from pathlib import Path
 
 import pyomo.environ as pyo
 import streamlit as st
 from pyomo.common.errors import ApplicationError
-from pyomo.common.tee import capture_output
 from pyomo.gdp import Disjunction
 from pyomo.opt import TerminationCondition
 
@@ -143,31 +144,26 @@ def build_model(data):
 
 def _solve_capturing(m, transform):
     """Apply the GDP transformation, run HiGHS, return
-    (results, log_text, elapsed). Captures HiGHS's stdout via Pyomo's
-    capture_output (FD-level redirect on newer Pyomo, plain stdout capture
-    on older). HiGHS via the appsi_highs LegacySolver doesn't support a
-    logfile= kwarg, so the FD capture is the only path. `elapsed` is the
-    wall-clock time of transformation + solve, in seconds — shown as a
-    metric on the Optimizer tab so users can compare the three GDP
-    reformulations head-to-head."""
+    (results, log_text, elapsed). Captures HiGHS's stdout via
+    contextlib.redirect_stdout/stderr — same pattern as knapsack /
+    diet / circle-packing. `appsi_highs` routes HiGHS's output through
+    Python, so the simpler Python-level redirect catches it without
+    going through Pyomo's capture_output (whose thread-local nesting
+    state has misbehaved under Streamlit's worker-thread pool).
+    `elapsed` is the wall-clock time of transformation + solve, in
+    seconds — shown as a metric on the Optimizer tab so users can
+    compare the three GDP reformulations head-to-head."""
     # Reformulate the GDP into a standard MILP. Big-M / Multiple Big-M use a
     # linearization with a large constant; Hull adds disaggregated copies of
     # the variables but tends to give tighter relaxations.
     t0 = time.perf_counter()
     pyo.TransformationFactory(transform).apply_to(m)
 
-    log_text = ""
-    try:
-        with capture_output(capture_fd=True) as buf:
-            solver = pyo.SolverFactory("appsi_highs")
-            results = solver.solve(m, tee=True)
-        log_text = buf.getvalue()
-    except TypeError:
-        # Older Pyomo without capture_fd — fall back to plain stdout capture.
-        with capture_output() as buf:
-            solver = pyo.SolverFactory("appsi_highs")
-            results = solver.solve(m, tee=True)
-        log_text = buf.getvalue()
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        solver = pyo.SolverFactory("appsi_highs")
+        results = solver.solve(m, tee=True)
+    log_text = buf.getvalue()
     elapsed = time.perf_counter() - t0
     return results, log_text, elapsed
 
