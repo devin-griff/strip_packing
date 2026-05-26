@@ -22,3 +22,7 @@ Thumbs.db
 # Tooling: Claude Code per-project settings + notebook checkpoints
 .claude/
 .ipynb_checkpoints/
+
+# Template bootstrap doc — untracked after first deploy, kept on disk
+# for reference. See git history for prior content if needed.
+SETUP.md
