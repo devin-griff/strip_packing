@@ -142,20 +142,39 @@ def build_model(data):
     return m
 
 
+def _ensure_pyomo_thread_locals():
+    """Workaround for a Pyomo bug. pyomo/gdp/plugins/multiple_bigm.py's
+    `_apply_to` opens with `if _thread_local.in_progress: raise ...`
+    without first lazy-initializing the attribute. The flag is only ever
+    *set* inside the function's try/finally, so on the very first call
+    on a given thread the read raises AttributeError. Streamlit rotates
+    requests through a worker-thread pool, so fresh workers hit this on
+    their first Multiple Big-M solve. Pre-initialize the flag here. The
+    try/except keeps us safe if Pyomo's internal module layout changes
+    (or upstream fixes the bug and we no longer need the workaround).
+    """
+    try:
+        from pyomo.gdp.plugins import multiple_bigm as _mbigm
+        if not hasattr(_mbigm._thread_local, "in_progress"):
+            _mbigm._thread_local.in_progress = False
+    except Exception:
+        pass
+
+
 def _solve_capturing(m, transform):
     """Apply the GDP transformation, run HiGHS, return
     (results, log_text, elapsed). Captures HiGHS's stdout via
     contextlib.redirect_stdout/stderr — same pattern as knapsack /
     diet / circle-packing. `appsi_highs` routes HiGHS's output through
     Python, so the simpler Python-level redirect catches it without
-    going through Pyomo's capture_output (whose thread-local nesting
-    state has misbehaved under Streamlit's worker-thread pool).
-    `elapsed` is the wall-clock time of transformation + solve, in
-    seconds — shown as a metric on the Optimizer tab so users can
-    compare the three GDP reformulations head-to-head."""
+    going through Pyomo's capture_output. `elapsed` is the wall-clock
+    time of transformation + solve, in seconds — shown as a metric on
+    the Optimizer tab so users can compare the three GDP
+    reformulations head-to-head."""
     # Reformulate the GDP into a standard MILP. Big-M / Multiple Big-M use a
     # linearization with a large constant; Hull adds disaggregated copies of
     # the variables but tends to give tighter relaxations.
+    _ensure_pyomo_thread_locals()
     t0 = time.perf_counter()
     pyo.TransformationFactory(transform).apply_to(m)
 
