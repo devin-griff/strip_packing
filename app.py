@@ -65,8 +65,8 @@ DEFAULT_DATA = {
 # TransformationFactory entries in pyomo.gdp.
 _GDP_TRANSFORMS = {
     "Big-M": "gdp.bigm",
-    "Hull": "gdp.hull",
     "Multiple Big-M": "gdp.mbigm",
+    "Hull": "gdp.hull",
 }
 _GDP_LABEL = {v: k for k, v in _GDP_TRANSFORMS.items()}
 
@@ -750,19 +750,19 @@ $$
             "variables; the LP relaxation is often loose."
         )
         st.markdown(
-            "- **Hull (convex hull / disaggregated)**: introduces "
-            "disaggregated copies of each variable, one per disjunct, with "
-            "scaled bounds. More variables and constraints, but the LP "
-            "relaxation is the convex hull of the feasible region — typically "
-            "tighter and faster on harder instances."
-        )
-        st.markdown(
             "- **Multiple Big-M**: the same shape as Big-M, but each "
             "constraint gets its own per-constraint $M$ rather than sharing "
             "one large global constant. Each $M$ is computed tight to that "
             "constraint from the variable bounds, so the LP relaxation is "
             "tighter than single-$M$ without growing the variable count the "
             "way Hull does — usually a midpoint between the two."
+        )
+        st.markdown(
+            "- **Hull (convex hull / disaggregated)**: introduces "
+            "disaggregated copies of each variable, one per disjunct, with "
+            "scaled bounds. More variables and constraints, but the LP "
+            "relaxation is the convex hull of the feasible region — typically "
+            "tighter and faster on harder instances."
         )
         st.markdown("**References**")
         st.markdown(
@@ -853,7 +853,7 @@ $$
             st.caption(
                 f"This is one of the {n_disj} pairwise disjunctions in the "
                 f"model. The GDP transformation rewrites each one into a "
-                f"set of standard MILP constraints (Big-M / Hull / mbigm)."
+                f"set of standard MILP constraints (Big-M / mbigm / Hull)."
             )
 
 
@@ -947,8 +947,8 @@ with _caption_col:
     st.markdown(
         "Pack $N$ rectangles into a strip of fixed width $W$ to minimize "
         "the strip length $L$. Edit the rectangle list directly on the "
-        "Optimizer tab, pick a GDP transformation (Big-M, Hull, Multiple "
-        "Big-M) below, and click **Solve**. "
+        "Optimizer tab, pick a GDP transformation (Big-M, Multiple Big-M, "
+        "Hull) below, and click **Solve**. "
         "Non-overlap is written as **disjunctions** (`pyomo.gdp`) and "
         "reformulated to a MILP for HiGHS. The **Formulation** and "
         "**Logs** tabs show the underlying GDP and solver output."
