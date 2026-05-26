@@ -507,6 +507,17 @@ def render_optimizer_tab():
             padding-top: 0.25rem; padding-bottom: 0.25rem;
             text-align: right; padding-right: 0.4rem;
         }
+        /* Color the "?" help icon on st.metric labels red, to draw
+           attention when the displayed length isn't proved optimal
+           (Best length carries a help tooltip in that case; Optimal
+           length doesn't). Scoped to stMetric so number_input help
+           icons (e.g. Strip width W) keep Streamlit's default gray. */
+        [data-testid="stMetric"] [data-testid="stTooltipHoverTarget"] svg,
+        [data-testid="stMetric"] [data-testid="stTooltipIcon"] svg {
+            color: #dc2626 !important;
+            fill: #dc2626 !important;
+            stroke: #dc2626 !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -1084,8 +1095,11 @@ with _caption_col:
         "Optimizer tab, pick a GDP transformation (Big-M, Multiple Big-M, "
         "Hull) below, and click **Solve**. "
         "Non-overlap is written as **disjunctions** (`pyomo.gdp`) and "
-        "reformulated to a MILP for HiGHS. The **Formulation** and "
-        "**Logs** tabs show the underlying GDP and solver output."
+        "reformulated to a MILP for HiGHS, capped at **10 s** of solve "
+        "time — if the solver doesn't prove optimality in that window, "
+        "the best feasible packing is shown alongside the remaining "
+        "**Gap**. The **Formulation** and **Logs** tabs show the "
+        "underlying GDP and solver output."
     )
 
 # Three tabs for the three views of the problem.
