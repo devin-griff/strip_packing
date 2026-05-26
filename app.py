@@ -764,6 +764,22 @@ $$
             "relaxation is the convex hull of the feasible region — typically "
             "tighter and faster on harder instances."
         )
+
+        st.markdown("**Solution method**")
+        st.markdown(
+            "Once the GDP is reformulated to a MILP, HiGHS solves it via "
+            "branch-and-bound: relax the binary disjunct indicators $z_k$ to "
+            "$[0, 1]$, solve the resulting LP, and either accept the solution "
+            "if all indicators are integer or branch on the most fractional "
+            "one. HiGHS is a modern open-source LP/MILP solver from "
+            "Edinburgh's ERGO group, distributed as a pip wheel via `highspy`."
+        )
+        st.markdown(
+            "See the [companion Jupyter notebook]"
+            "(https://github.com/devin-griff/strip-packing/blob/main/Strip%20packing.ipynb) "
+            "for the Pyomo implementation."
+        )
+
         st.markdown("**References**")
         st.markdown(
             "[1] Q. Chen, E. S. Johnson, D. E. Bernal, R. Valentin, S. Kale, "
