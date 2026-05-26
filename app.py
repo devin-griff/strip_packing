@@ -766,21 +766,21 @@ $$
             '"Pyomo.GDP: an ecosystem for logic based modeling and '
             'optimization development," *Optimization and Engineering*, '
             "vol. 23, no. 1, pp. 607–642, 2022. "
-            "[[Springer]](https://link.springer.com/article/10.1007/s11081-021-09601-7)"
+            "[Springer](https://link.springer.com/article/10.1007/s11081-021-09601-7)"
         )
         st.markdown(
             "[2] R. Raman and I. E. Grossmann, "
             '"Modelling and computational techniques for logic based integer '
             'programming," *Computers & Chemical Engineering*, vol. 18, '
             "no. 7, pp. 563–578, 1994. "
-            "[[ScienceDirect]](https://www.sciencedirect.com/science/article/pii/0098135493E00107)"
+            "[ScienceDirect](https://www.sciencedirect.com/science/article/pii/0098135493E00107)"
         )
         st.markdown(
             "[3] P. M. Castro and I. E. Grossmann, "
             '"Generalized Disjunctive Programming as a Systematic Modeling '
             'Framework to Derive Scheduling Formulations," *Industrial & '
             "Engineering Chemistry Research*, vol. 51, no. 16, pp. 5781–5792, "
-            "2012. [[ACS]](https://pubs.acs.org/doi/10.1021/ie2030486)"
+            "2012. [ACS](https://pubs.acs.org/doi/10.1021/ie2030486)"
         )
         st.markdown(
             "[4] N. W. Sawaya and I. E. Grossmann, "
@@ -788,13 +788,20 @@ $$
             'disjunctive programming problems," in *Computer Aided Chemical '
             "Engineering: Process Systems Engineering 2003*, Elsevier, "
             "pp. 1032–1037, 2003. "
-            "[[ScienceDirect]](https://www.sciencedirect.com/science/chapter/bookseries/abs/pii/S1570794603804443)"
+            "[ScienceDirect](https://www.sciencedirect.com/science/chapter/bookseries/abs/pii/S1570794603804443)"
         )
         st.markdown(
             "[5] Q. Huangfu and J. A. J. Hall, "
             '"Parallelizing the dual revised simplex method," *Mathematical '
             "Programming Computation*, vol. 10, no. 1, pp. 119–142, 2018. "
-            "[[Springer]](https://link.springer.com/article/10.1007/s12532-017-0130-5)"
+            "[Springer](https://link.springer.com/article/10.1007/s12532-017-0130-5)"
+        )
+        st.markdown(
+            "[6] M. L. Bynum, G. A. Hackebeil, W. E. Hart, C. D. Laird, "
+            "B. L. Nicholson, J. D. Siirola, J.-P. Watson, and D. L. Woodruff, "
+            "*Pyomo — Optimization Modeling in Python*, 3rd ed. "
+            "Cham: Springer, 2021. "
+            "[Springer](https://link.springer.com/book/10.1007/978-3-030-68928-5)"
         )
 
     with sub_instance:
