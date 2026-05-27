@@ -41,6 +41,7 @@ COPY app.py favicon.png ./
 # default "Streamlit" title flashing for ~1s before being replaced.
 RUN STATIC=$(python -c "import streamlit, os; print(os.path.join(os.path.dirname(streamlit.__file__), 'static'))") \
     && sed -i 's|<title>Streamlit</title>|<title>Strip Packing</title>|' "$STATIC/index.html" \
+    && sed -i 's|</head>|<link rel="icon" type="image/png" href="./favicon.png"/><meta property="og:type" content="website"/><meta property="og:title" content="Strip Packing GDP Optimizer"/><meta property="og:description" content="Pack N rectangles into a fixed-width strip to minimize length. Non-overlap as a GDP, reformulated to a MILP for Pyomo + HiGHS, runs in your browser."/><meta property="og:image" content="https://griffith-pse.com/images/strip-packing.png"/><meta property="og:site_name" content="Griffith PSE"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="Strip Packing GDP Optimizer"/><meta name="twitter:description" content="Pack N rectangles into a fixed-width strip to minimize length. Non-overlap as a GDP, reformulated to a MILP for Pyomo + HiGHS, runs in your browser."/><meta name="twitter:image" content="https://griffith-pse.com/images/strip-packing.png"/></head>|' "$STATIC/index.html" \
     && cp /app/favicon.png "$STATIC/favicon.png" && cp /app/favicon.png "$STATIC/favicon.ico"
 
 # Run as a non-root user. If a future Streamlit (or transitive dep) RCE
