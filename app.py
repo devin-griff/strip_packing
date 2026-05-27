@@ -497,14 +497,18 @@ def _render_top_metric(slot, label, value, suffix_html=""):
     alignment / font-size mismatches in earlier attempts. Wrapper
     margin matches diet's colored_metric (top 0.25rem / bottom 1rem)
     so the value has enough breathing room below — without it, the
-    strip's negative-margin layout crowds up against the value text."""
+    strip's negative-margin layout crowds up against the value text.
+    `white-space: nowrap` on both label and value keeps each metric
+    on a single line per row (otherwise "100.0%" or "Efficiency"
+    wrap in narrow columns)."""
     slot.markdown(
         "<div style='margin:0.25rem 0 1rem 0; line-height:1.2;'>"
         "<div style='font-size:0.875rem; color:rgba(49,51,63,0.6); "
-        "margin-bottom:0.25rem;'>"
+        "margin-bottom:0.25rem; white-space:nowrap;'>"
         f"{label}"
         "</div>"
-        "<div style='font-size:2.25rem; font-weight:400; line-height:1.2;'>"
+        "<div style='font-size:2.25rem; font-weight:400; line-height:1.2; "
+        "white-space:nowrap;'>"
         f"{value}{suffix_html}"
         "</div>"
         "</div>",
@@ -753,19 +757,37 @@ def render_optimizer_tab():
     )
     opt_L = float(optimal["L"]) if has_incumbent else None
     gap_pct = optimal.get("gap_pct") if optimal else None
+    x_top = max(opt_L or 0.0, L_max, 12.0)
+    area = total_area(data)
+    W = float(data["W"])
+    eff_pct = (
+        (area / (W * opt_L) * 100.0)
+        if (has_incumbent and W > 0 and opt_L and opt_L > 0)
+        else None
+    )
+    # 100% efficiency means the rectangles fill the strip with zero
+    # waste — that's the theoretical lower bound on L (L >= area / W),
+    # so this incumbent IS provably optimal regardless of what HiGHS's
+    # LP-derived dual bound says. The Big-M / mbigm LP relaxations can
+    # be very loose so the solver may report a large gap even when the
+    # geometry rules out anything better.
+    geometrically_optimal = (
+        eff_pct is not None and eff_pct >= 100.0 - GAP_OPTIMAL_THRESHOLD_PCT
+    )
+    if geometrically_optimal:
+        gap_pct = 0.0
     # "Proved optimal" drives the metric label: HiGHS marked it optimal,
-    # OR the bound gap is below the noise floor (e.g. solver terminated
-    # at time-limit but already had a near-zero gap).
+    # OR the bound gap is below the noise floor (solver terminated at
+    # time-limit but already had a near-zero gap), OR efficiency hit
+    # 100% (geometric proof of optimality).
     proved_optimal = bool(
         optimal
         and (
             optimal["status"] == "optimal"
             or (gap_pct is not None and gap_pct < GAP_OPTIMAL_THRESHOLD_PCT)
+            or geometrically_optimal
         )
     )
-    x_top = max(opt_L or 0.0, L_max, 12.0)
-    area = total_area(data)
-    W = float(data["W"])
 
     # Strip visualization tracks the latest packing: naive cascade until
     # the user solves, then the incumbent (proven optimum or
@@ -778,11 +800,6 @@ def render_optimizer_tab():
         else naive_layout(data)
     )
     display_L = opt_L if has_incumbent else L_max
-    eff_pct = (
-        (area / (W * opt_L) * 100.0)
-        if (has_incumbent and W > 0 and opt_L and opt_L > 0)
-        else None
-    )
 
     with strip_slot.container():
         _render_optimizer_strip(data, display_layout, display_L, x_top)
@@ -847,8 +864,12 @@ def render_optimizer_tab():
         _render_top_metric(gap_slot, "Gap", "0.0%")
     else:
         _render_top_metric(gap_slot, "Gap", f"{gap_pct:.1f}%")
+    # "Total time" not "Solve time": this is wall-clock time for the
+    # GDP transformation + HiGHS master solve combined. The 10 s cap
+    # applies only to the HiGHS solve; mbigm's transformation runs LP
+    # subproblems before HiGHS starts, so the total can exceed 10 s.
     _render_top_metric(
-        time_slot, "Solve time",
+        time_slot, "Total time",
         f"{elapsed:.2f} s" if isinstance(elapsed, (int, float)) else "—",
     )
 
