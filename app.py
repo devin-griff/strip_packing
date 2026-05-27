@@ -1115,9 +1115,9 @@ $$
         st.markdown(
             f"**N (rectangles)** &nbsp; {N}  \n"
             f"**W (strip width)** &nbsp; {data['W']:g}  \n"
-            f"**Total area $\\sum_i w_i \\ell_i$** &nbsp; {area:.3f}  \n"
+            f"**Total area $\\sum_i w_i \\ell_i$** &nbsp; {area:g}  \n"
             f"**Lower bound on L** &nbsp; "
-            f"$\\max(\\max_i \\ell_i,\\ \\sum_i w_i \\ell_i / W) = {L_lb:.3f}$  \n"
+            f"$\\max(\\max_i \\ell_i,\\ \\sum_i w_i \\ell_i / W) = {L_lb:g}$  \n"
             f"**Disjunctions $N(N-1)/2$** &nbsp; {n_disj}"
         )
 
