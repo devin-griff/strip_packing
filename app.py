@@ -1059,7 +1059,7 @@ $$
         )
         st.markdown(
             "See the [companion Jupyter notebook]"
-            "(https://github.com/devin-griff/strip-packing/blob/main/Strip%20packing.ipynb) "
+            "(https://github.com/devin-griff/strip_packing/blob/main/Strip%20packing.ipynb) "
             "for the Pyomo implementation."
         )
 
