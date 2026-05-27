@@ -767,30 +767,13 @@ def render_optimizer_tab():
     if proved_optimal:
         opt_slot.metric("Optimal length", f"{opt_L:.0f}")
     elif has_incumbent:
-        # Render the metric ourselves so we can drop a red ⚠ next to
-        # the label (st.metric's help= renders a busy MUI icon). We
-        # use Streamlit's own `data-testid` attributes on the wrapper
-        # divs so the app-wide CSS for stMetric / stMetricLabel /
-        # stMetricValue applies — that way the label font size, value
-        # font size, vertical spacing, and baseline all match the
-        # other metrics in the row exactly.
-        tooltip = (
-            f"Solver hit the {SOLVE_TIME_LIMIT_S:g} s time cap before "
-            "proving optimality. This is the best feasible packing "
-            "found so far; see Gap for how far it could still tighten."
-        )
-        opt_slot.markdown(
-            '<div data-testid="stMetric">'
-            '<div data-testid="stMetricLabel">'
-            'Best length '
-            '<span class="strip-violation-icon" '
-            f'data-violation-tooltip="{tooltip}" '
-            'style="color:#dc2626; cursor:default; font-weight:600;">⚠</span>'
-            '</div>'
-            f'<div data-testid="stMetricValue">{opt_L:.0f}</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+        # Use a real st.metric so the label / value font sizes and
+        # baseline match the other metrics in the row exactly. The
+        # red ⚠ is part of the label string, colored via Streamlit's
+        # `:red[]` markdown color shortcode (supported in st.metric
+        # labels since ~1.30). No hover tooltip — the non-zero Gap
+        # metric next to this one is the explanatory signal.
+        opt_slot.metric("Best length :red[⚠]", f"{opt_L:.0f}")
     else:
         opt_slot.metric("Optimal length", "—")
     eff_slot.metric(
