@@ -563,30 +563,35 @@ def render_optimizer_tab():
             padding-top: 0.25rem; padding-bottom: 0.25rem;
             text-align: right; padding-right: 0.4rem;
         }
-        /* Color the "?" help icon on st.metric labels red, to draw
-           attention when the displayed length isn't proved optimal
-           (Best length carries a help tooltip in that case; Optimal
-           length doesn't). Scoped to stMetric so number_input help
-           icons (e.g. Strip width W) keep Streamlit's default gray.
-
-           Two CSS layers, neither breaks the "?" cutout shape:
-            - `color: #dc2626` on the SVG cascades via currentColor
-              (works on Streamlit builds whose icon path uses
-              `fill: currentColor`).
-            - `fill: #dc2626` on the path element directly (NOT on
-              the SVG container) covers the case where the icon
-              doesn't use currentColor. Targeting the path preserves
-              the path's own fill-rule (evenodd, which makes the "?"
-              a transparent cutout), unlike setting fill on the SVG
-              element which historically painted the whole icon
-              solid red. */
-        [data-testid="stMetric"] [data-testid="stTooltipHoverTarget"] svg,
-        [data-testid="stMetric"] [data-testid="stTooltipIcon"] svg {
-            color: #dc2626 !important;
+        /* Red ⚠ glyph next to "Best length" when the solver didn't
+           prove optimality within the time cap. Mirrors the
+           .diet-violation-icon pattern: a red unicode glyph that
+           reveals a black tooltip bubble on hover. We do this here
+           (rather than via st.metric's help= which renders a busy
+           MUI icon) so the visual matches the constraint-violation
+           glyphs used elsewhere in the app family. */
+        .strip-violation-icon {
+            position: relative;
+            display: inline-block;
         }
-        [data-testid="stMetric"] [data-testid="stTooltipHoverTarget"] svg path,
-        [data-testid="stMetric"] [data-testid="stTooltipIcon"] svg path {
-            fill: #dc2626 !important;
+        .strip-violation-icon:hover::after {
+            content: attr(data-violation-tooltip);
+            position: absolute;
+            top: 100%;
+            left: 100%;
+            margin-left: 0.5rem;
+            background: #000;
+            color: #fff;
+            padding: 0.5rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: inherit;
+            font-weight: 400;
+            line-height: 1.2;
+            max-width: 22rem;
+            white-space: normal;
+            z-index: 1000;
+            pointer-events: none;
         }
         </style>
         """,
@@ -762,14 +767,30 @@ def render_optimizer_tab():
     if proved_optimal:
         opt_slot.metric("Optimal length", f"{opt_L:.0f}")
     elif has_incumbent:
-        opt_slot.metric(
-            "Best length",
-            f"{opt_L:.0f}",
-            help=(
-                f"Solver hit the {SOLVE_TIME_LIMIT_S:g} s time cap before "
-                "proving optimality. This is the best feasible packing "
-                "found so far; see Gap for how far it could still tighten."
-            ),
+        # Render a metric-shaped block by hand so we can drop a red ⚠
+        # glyph next to the label — same pattern diet / knapsack use
+        # for constraint-violation marks. st.metric's help= renders a
+        # busy MUI icon that visually clashed with the rest of the row.
+        tooltip = (
+            f"Solver hit the {SOLVE_TIME_LIMIT_S:g} s time cap before "
+            "proving optimality. This is the best feasible packing "
+            "found so far; see Gap for how far it could still tighten."
+        )
+        opt_slot.markdown(
+            '<div data-testid="stMetric" style="margin:0;">'
+            '<div style="font-size:0.875rem; color:rgba(49,51,63,0.6); '
+            'margin-bottom:0.25rem;">'
+            'Best length '
+            '<span class="strip-violation-icon" '
+            f'data-violation-tooltip="{tooltip}" '
+            'style="color:#dc2626; cursor:default; font-weight:600; '
+            'font-size:0.95em; vertical-align:baseline;">⚠</span>'
+            '</div>'
+            '<div style="font-size:2.25rem; font-weight:400; line-height:1.2;">'
+            f'{opt_L:.0f}'
+            '</div>'
+            '</div>',
+            unsafe_allow_html=True,
         )
     else:
         opt_slot.metric("Optimal length", "—")
