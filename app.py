@@ -494,11 +494,12 @@ def _render_top_metric(slot, label, value, suffix_html=""):
 
     All five top-row metrics use this helper so they're styled
     identically; mixing st.metric with custom HTML produced visible
-    alignment / font-size mismatches in earlier attempts. Font sizes
-    and weights are tuned to read at roughly the same visual weight
-    as st.metric defaults."""
+    alignment / font-size mismatches in earlier attempts. Wrapper
+    margin matches diet's colored_metric (top 0.25rem / bottom 1rem)
+    so the value has enough breathing room below — without it, the
+    strip's negative-margin layout crowds up against the value text."""
     slot.markdown(
-        "<div style='margin:0; padding:0; line-height:1.2;'>"
+        "<div style='margin:0.25rem 0 1rem 0; line-height:1.2;'>"
         "<div style='font-size:0.875rem; color:rgba(49,51,63,0.6); "
         "margin-bottom:0.25rem;'>"
         f"{label}"
