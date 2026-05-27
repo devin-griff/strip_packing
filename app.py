@@ -612,8 +612,15 @@ def render_optimizer_tab():
             font-size: 0.75rem;
             font-family: inherit;
             font-weight: 400;
-            line-height: 1.2;
-            max-width: 22rem;
+            line-height: 1.4;
+            /* `width: max-content` makes the bubble expand to its
+               natural content width (no wrapping); `max-width: 24rem`
+               then caps it so very long messages still wrap. Without
+               max-content the absolute-positioned ::after would
+               shrink-to-fit aggressively and wrap after every word or
+               two, which is what showed up in the field. */
+            width: max-content;
+            max-width: 24rem;
             white-space: normal;
             z-index: 1000;
             pointer-events: none;
