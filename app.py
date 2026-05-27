@@ -485,6 +485,32 @@ _PALETTE = [
 ]
 
 
+def _render_top_metric(slot, label, value, suffix_html=""):
+    """Render a metric-shaped block via raw HTML. Mirrors the
+    `colored_metric` helper in the diet app: a small gray label on
+    top, large value below, with an optional HTML suffix appended
+    inside the value div (used to drop a red ⚠ glyph next to "Best
+    length" when the solver didn't prove optimality).
+
+    All five top-row metrics use this helper so they're styled
+    identically; mixing st.metric with custom HTML produced visible
+    alignment / font-size mismatches in earlier attempts. Font sizes
+    and weights are tuned to read at roughly the same visual weight
+    as st.metric defaults."""
+    slot.markdown(
+        "<div style='margin:0; padding:0; line-height:1.2;'>"
+        "<div style='font-size:0.875rem; color:rgba(49,51,63,0.6); "
+        "margin-bottom:0.25rem;'>"
+        f"{label}"
+        "</div>"
+        "<div style='font-size:2.25rem; font-weight:400; line-height:1.2;'>"
+        f"{value}{suffix_html}"
+        "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _render_optimizer_strip(data, layout, L, x_top):
     """Render the optimizer's layout as absolutely-positioned HTML divs
     inside a responsive container. The container's width fills its parent
@@ -563,19 +589,33 @@ def render_optimizer_tab():
             padding-top: 0.25rem; padding-bottom: 0.25rem;
             text-align: right; padding-right: 0.4rem;
         }
-        /* Red ⚠ glyph appended to the "Best length" metric label
-           when the solver didn't prove optimality within the time
-           cap. We mark the metric's container via a hidden
-           `.best-length-warning` span and use `:has()` to scope
-           this rule to the right metric without affecting the
-           other four. The glyph is added via `::after` so it
-           inherits the label's font metrics and stays inline. */
-        [data-testid="stVerticalBlock"]:has(.best-length-warning)
-            [data-testid="stMetricLabel"]::after {
-            content: " ⚠";
-            color: #dc2626;
-            font-weight: 700;
-            margin-left: 0.25em;
+        /* Red ⚠ glyph next to "Best length" when the solver didn't
+           prove optimality within the time cap. Hovering the glyph
+           reveals a black tooltip bubble with the time-cap
+           explanation. Same pattern diet / knapsack use for their
+           constraint-violation marks. */
+        .strip-violation-icon {
+            position: relative;
+            display: inline-block;
+        }
+        .strip-violation-icon:hover::after {
+            content: attr(data-violation-tooltip);
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 0.25rem;
+            background: #000;
+            color: #fff;
+            padding: 0.5rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: inherit;
+            font-weight: 400;
+            line-height: 1.2;
+            max-width: 22rem;
+            white-space: normal;
+            z-index: 1000;
+            pointer-events: none;
         }
         </style>
         """,
@@ -747,38 +787,45 @@ def render_optimizer_tab():
                 st.error(f"Solver returned: {optimal['status']}")
     elapsed = optimal.get("elapsed") if optimal else None
 
-    ub_slot.metric("Upper bound", f"{L_max:.0f}")
+    # All 5 metrics in the top row are rendered via the same custom
+    # HTML helper so they're visually consistent with each other AND
+    # so the "Best length" case can drop a red ⚠ glyph in cleanly as
+    # `suffix_html`. This is the same pattern the diet / knapsack apps
+    # use; mixing st.metric with custom HTML for one slot is what
+    # caused the earlier alignment / styling issues.
+    _render_top_metric(ub_slot, "Upper bound", f"{L_max:.0f}")
     if proved_optimal:
-        opt_slot.metric("Optimal length", f"{opt_L:.0f}")
+        _render_top_metric(opt_slot, "Optimal length", f"{opt_L:.0f}")
     elif has_incumbent:
-        # Render a real st.metric so the label / value font sizes and
-        # baseline match the other metrics in the row exactly. The
-        # red ⚠ is added via CSS ::after on the label, scoped by a
-        # hidden sibling marker (.best-length-warning) that lets a
-        # `:has()` selector pick out THIS metric without affecting
-        # the others. No hover tooltip — the non-zero Gap right next
-        # to this metric is the explanatory signal.
-        with opt_slot.container():
-            st.markdown(
-                '<span class="best-length-warning" '
-                'style="display:none"></span>',
-                unsafe_allow_html=True,
-            )
-            st.metric("Best length", f"{opt_L:.0f}")
+        tooltip = (
+            f"Solver hit the {SOLVE_TIME_LIMIT_S:g} s time cap before "
+            "proving optimality. This is the best feasible packing "
+            "found so far; see Gap for how far it could still tighten."
+        )
+        violation_icon = (
+            '<span class="strip-violation-icon" '
+            f'data-violation-tooltip="{tooltip}" '
+            'style="color:#dc2626; cursor:default; font-weight:700; '
+            'margin-left:0.4em; vertical-align:baseline;">⚠</span>'
+        )
+        _render_top_metric(
+            opt_slot, "Best length", f"{opt_L:.0f}",
+            suffix_html=violation_icon,
+        )
     else:
-        opt_slot.metric("Optimal length", "—")
-    eff_slot.metric(
-        "Efficiency",
+        _render_top_metric(opt_slot, "Optimal length", "—")
+    _render_top_metric(
+        eff_slot, "Efficiency",
         f"{eff_pct:.1f}%" if eff_pct is not None else "—",
     )
     if gap_pct is None:
-        gap_slot.metric("Gap", "—")
+        _render_top_metric(gap_slot, "Gap", "—")
     elif gap_pct < GAP_OPTIMAL_THRESHOLD_PCT:
-        gap_slot.metric("Gap", "0.0%")
+        _render_top_metric(gap_slot, "Gap", "0.0%")
     else:
-        gap_slot.metric("Gap", f"{gap_pct:.1f}%")
-    time_slot.metric(
-        "Solve time",
+        _render_top_metric(gap_slot, "Gap", f"{gap_pct:.1f}%")
+    _render_top_metric(
+        time_slot, "Solve time",
         f"{elapsed:.2f} s" if isinstance(elapsed, (int, float)) else "—",
     )
 
