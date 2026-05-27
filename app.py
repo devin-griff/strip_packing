@@ -708,6 +708,11 @@ def render_optimizer_tab():
         gap_slot = top_row[6].empty()
         time_slot = top_row[7].empty()
         strip_slot = st.empty()
+        # Dedicated slot for the "Solving..." spinner so it can appear
+        # just below the strip without replacing the strip itself.
+        # st.empty() has zero height when empty, so it doesn't affect
+        # layout when no solve is running.
+        spinner_slot = st.empty()
 
     transform_key = _GDP_TRANSFORMS[transform_label]
 
@@ -723,9 +728,14 @@ def render_optimizer_tab():
     # The spinner is rendered inside strip_slot so it shows in the strip
     # area (which is empty while we solve), not below the editor.
     if solve_clicked:
-        with strip_slot.container():
+        # Render the spinner in its own slot below the strip so the
+        # existing strip (if any) stays visible during the solve
+        # instead of being replaced. After the solve returns, clear
+        # the spinner_slot so it reverts to zero height.
+        with spinner_slot.container():
             with st.spinner("Solving GDP-transformed MILP via HiGHS..."):
                 result = solve(data, transform_key)
+        spinner_slot.empty()
         st.session_state.optimal = result
         optimal = result
 
