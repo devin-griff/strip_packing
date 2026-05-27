@@ -767,28 +767,27 @@ def render_optimizer_tab():
     if proved_optimal:
         opt_slot.metric("Optimal length", f"{opt_L:.0f}")
     elif has_incumbent:
-        # Render a metric-shaped block by hand so we can drop a red ⚠
-        # glyph next to the label — same pattern diet / knapsack use
-        # for constraint-violation marks. st.metric's help= renders a
-        # busy MUI icon that visually clashed with the rest of the row.
+        # Render the metric ourselves so we can drop a red ⚠ next to
+        # the label (st.metric's help= renders a busy MUI icon). We
+        # use Streamlit's own `data-testid` attributes on the wrapper
+        # divs so the app-wide CSS for stMetric / stMetricLabel /
+        # stMetricValue applies — that way the label font size, value
+        # font size, vertical spacing, and baseline all match the
+        # other metrics in the row exactly.
         tooltip = (
             f"Solver hit the {SOLVE_TIME_LIMIT_S:g} s time cap before "
             "proving optimality. This is the best feasible packing "
             "found so far; see Gap for how far it could still tighten."
         )
         opt_slot.markdown(
-            '<div data-testid="stMetric" style="margin:0;">'
-            '<div style="font-size:0.875rem; color:rgba(49,51,63,0.6); '
-            'margin-bottom:0.25rem;">'
+            '<div data-testid="stMetric">'
+            '<div data-testid="stMetricLabel">'
             'Best length '
             '<span class="strip-violation-icon" '
             f'data-violation-tooltip="{tooltip}" '
-            'style="color:#dc2626; cursor:default; font-weight:600; '
-            'font-size:0.95em; vertical-align:baseline;">⚠</span>'
+            'style="color:#dc2626; cursor:default; font-weight:600;">⚠</span>'
             '</div>'
-            '<div style="font-size:2.25rem; font-weight:400; line-height:1.2;">'
-            f'{opt_L:.0f}'
-            '</div>'
+            f'<div data-testid="stMetricValue">{opt_L:.0f}</div>'
             '</div>',
             unsafe_allow_html=True,
         )
