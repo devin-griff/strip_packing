@@ -567,12 +567,14 @@ def render_optimizer_tab():
            attention when the displayed length isn't proved optimal
            (Best length carries a help tooltip in that case; Optimal
            length doesn't). Scoped to stMetric so number_input help
-           icons (e.g. Strip width W) keep Streamlit's default gray. */
+           icons (e.g. Strip width W) keep Streamlit's default gray.
+           Only override `color`; the MUI HelpOutline icon uses
+           `fill: currentColor` so the question-mark shape is
+           preserved. Explicit fill/stroke overrides would paint the
+           whole SVG solid and obliterate the "?" cutout. */
         [data-testid="stMetric"] [data-testid="stTooltipHoverTarget"] svg,
         [data-testid="stMetric"] [data-testid="stTooltipIcon"] svg {
             color: #dc2626 !important;
-            fill: #dc2626 !important;
-            stroke: #dc2626 !important;
         }
         </style>
         """,
@@ -815,7 +817,6 @@ def _render_rect_editor(data):
         )
         delete_clicked = cols[3].button(
             "🗑", key=f"del_{rid}_{ver}",
-            help=f"Delete rectangle {idx}",
         )
         if delete_clicked:
             st.session_state.data = remove_rect(dict(data), rid)
