@@ -568,13 +568,25 @@ def render_optimizer_tab():
            (Best length carries a help tooltip in that case; Optimal
            length doesn't). Scoped to stMetric so number_input help
            icons (e.g. Strip width W) keep Streamlit's default gray.
-           Only override `color`; the MUI HelpOutline icon uses
-           `fill: currentColor` so the question-mark shape is
-           preserved. Explicit fill/stroke overrides would paint the
-           whole SVG solid and obliterate the "?" cutout. */
+
+           Two CSS layers, neither breaks the "?" cutout shape:
+            - `color: #dc2626` on the SVG cascades via currentColor
+              (works on Streamlit builds whose icon path uses
+              `fill: currentColor`).
+            - `fill: #dc2626` on the path element directly (NOT on
+              the SVG container) covers the case where the icon
+              doesn't use currentColor. Targeting the path preserves
+              the path's own fill-rule (evenodd, which makes the "?"
+              a transparent cutout), unlike setting fill on the SVG
+              element which historically painted the whole icon
+              solid red. */
         [data-testid="stMetric"] [data-testid="stTooltipHoverTarget"] svg,
         [data-testid="stMetric"] [data-testid="stTooltipIcon"] svg {
             color: #dc2626 !important;
+        }
+        [data-testid="stMetric"] [data-testid="stTooltipHoverTarget"] svg path,
+        [data-testid="stMetric"] [data-testid="stTooltipIcon"] svg path {
+            fill: #dc2626 !important;
         }
         </style>
         """,
