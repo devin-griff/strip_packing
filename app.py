@@ -563,35 +563,19 @@ def render_optimizer_tab():
             padding-top: 0.25rem; padding-bottom: 0.25rem;
             text-align: right; padding-right: 0.4rem;
         }
-        /* Red ⚠ glyph next to "Best length" when the solver didn't
-           prove optimality within the time cap. Mirrors the
-           .diet-violation-icon pattern: a red unicode glyph that
-           reveals a black tooltip bubble on hover. We do this here
-           (rather than via st.metric's help= which renders a busy
-           MUI icon) so the visual matches the constraint-violation
-           glyphs used elsewhere in the app family. */
-        .strip-violation-icon {
-            position: relative;
-            display: inline-block;
-        }
-        .strip-violation-icon:hover::after {
-            content: attr(data-violation-tooltip);
-            position: absolute;
-            top: 100%;
-            left: 100%;
-            margin-left: 0.5rem;
-            background: #000;
-            color: #fff;
-            padding: 0.5rem 0.75rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-family: inherit;
-            font-weight: 400;
-            line-height: 1.2;
-            max-width: 22rem;
-            white-space: normal;
-            z-index: 1000;
-            pointer-events: none;
+        /* Red ⚠ glyph appended to the "Best length" metric label
+           when the solver didn't prove optimality within the time
+           cap. We mark the metric's container via a hidden
+           `.best-length-warning` span and use `:has()` to scope
+           this rule to the right metric without affecting the
+           other four. The glyph is added via `::after` so it
+           inherits the label's font metrics and stays inline. */
+        [data-testid="stVerticalBlock"]:has(.best-length-warning)
+            [data-testid="stMetricLabel"]::after {
+            content: " ⚠";
+            color: #dc2626;
+            font-weight: 700;
+            margin-left: 0.25em;
         }
         </style>
         """,
@@ -767,13 +751,20 @@ def render_optimizer_tab():
     if proved_optimal:
         opt_slot.metric("Optimal length", f"{opt_L:.0f}")
     elif has_incumbent:
-        # Use a real st.metric so the label / value font sizes and
+        # Render a real st.metric so the label / value font sizes and
         # baseline match the other metrics in the row exactly. The
-        # red ⚠ is part of the label string, colored via Streamlit's
-        # `:red[]` markdown color shortcode (supported in st.metric
-        # labels since ~1.30). No hover tooltip — the non-zero Gap
-        # metric next to this one is the explanatory signal.
-        opt_slot.metric("Best length :red[⚠]", f"{opt_L:.0f}")
+        # red ⚠ is added via CSS ::after on the label, scoped by a
+        # hidden sibling marker (.best-length-warning) that lets a
+        # `:has()` selector pick out THIS metric without affecting
+        # the others. No hover tooltip — the non-zero Gap right next
+        # to this metric is the explanatory signal.
+        with opt_slot.container():
+            st.markdown(
+                '<span class="best-length-warning" '
+                'style="display:none"></span>',
+                unsafe_allow_html=True,
+            )
+            st.metric("Best length", f"{opt_L:.0f}")
     else:
         opt_slot.metric("Optimal length", "—")
     eff_slot.metric(
