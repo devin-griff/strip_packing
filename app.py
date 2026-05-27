@@ -667,8 +667,13 @@ def render_optimizer_tab():
         # Six metric slots after the controls: title room shrinks one
         # column-unit to make room for Gap. Order matches the user's
         # mental flow: bounds → result → quality → optimality → time.
+        # Column weights: Solve / W / Transformation / 5 metric slots.
+        # W gets 1.6 (vs 1 for the metric slots) so the +/- stepper
+        # buttons have room to sit inline beside the input — at
+        # weight 1 the column was too narrow and the steppers wrapped
+        # to a second line as a thin teal bar.
         top_row = st.columns(
-            [1, 1, 3, 1, 1, 1, 1, 1],
+            [1, 1.6, 3, 1, 1, 1, 1, 1],
             vertical_alignment="bottom",
         )
         with top_row[0]:
