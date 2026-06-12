@@ -1,13 +1,14 @@
 # Strip Packing GDP Optimizer
 
 A Streamlit app for the classic strip-packing problem as a generalized
-disjunctive program (Pyomo + HiGHS): pack N rectangles into a fixed-width
-strip to minimize the used length. Edit the rectangle list inline and pick
-a GDP transformation (Big-M, Multiple Big-M, Hull); the app reformulates
-the disjunctive non-overlap constraints into a MILP, solves it with
-HiGHS, and visualizes the optimal packing. The in-app **📐 Formulation**
-tab walks through the disjunctive math and the three reformulations —
-see [References](#references) below.
+disjunctive program (Pyomo + HiGHS/Gurobi): pack N rectangles into a
+fixed-width strip to minimize the used length. Edit the rectangle list
+inline, pick a GDP transformation (Big-M, Hull) and a MIP
+solver (open-source HiGHS or commercial Gurobi); the app reformulates the
+disjunctive non-overlap constraints into a MILP, solves it, and visualizes
+the optimal packing. The in-app **📐 Formulation** tab walks through the
+disjunctive math, the three reformulations, and the symmetry-breaking
+constraints — see [References](#references) below.
 
 **Live demo:** https://strip-packing.griffith-pse.com  
 **Home:** https://griffith-pse.com
@@ -18,7 +19,10 @@ see [References](#references) below.
     streamlit run app.py
 
 HiGHS ships as a pip wheel (`highspy`), so `pip install` covers everything —
-no separate solver install needed.
+no separate solver install needed. The Gurobi mode additionally needs a
+Gurobi license (set `GRB_LICENSE_FILE` to point at it); without one,
+gurobipy falls back to its bundled size-limited trial license, which only
+handles small instances. HiGHS mode always works.
 
 ## Deployment
 
@@ -32,7 +36,7 @@ auto-stop machines. Custom domain wired through Cloudflare DNS.
 
 ## Files
 
-- `app.py` — Streamlit UI, Pyomo model, HiGHS wrapper
+- `app.py` — Streamlit UI, Pyomo model, HiGHS/Gurobi solve paths
 - `Strip packing.ipynb` — formulation in a notebook
 - `requirements.txt` — Python deps
 - `Dockerfile`, `fly.toml`, `.dockerignore` — Fly.io production image config
@@ -57,12 +61,25 @@ a Systematic Modeling Framework to Derive Scheduling Formulations,"
 2012.
 [ACS](https://pubs.acs.org/doi/10.1021/ie2030486)
 
-[4] Q. Huangfu and J. A. J. Hall, "Parallelizing the dual revised simplex
+[4] N. W. Sawaya and I. E. Grossmann, "A cutting plane method for solving
+linear generalized disjunctive programming problems," *Computers & Chemical
+Engineering*, vol. 29, no. 9, pp. 1891–1913, 2005.
+[ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0098135405000992)
+
+[5] F. Trespalacios and I. E. Grossmann, "Symmetry breaking for generalized
+disjunctive programming formulation of the strip packing problem," *Annals
+of Operations Research*, vol. 258, pp. 747–759, 2017.
+[Springer](https://link.springer.com/article/10.1007/s10479-016-2112-9)
+
+[6] Q. Huangfu and J. A. J. Hall, "Parallelizing the dual revised simplex
 method," *Mathematical Programming Computation*, vol. 10, no. 1, pp. 119–142,
 2018.
 [Springer](https://link.springer.com/article/10.1007/s12532-017-0130-5)
 
-[5] M. L. Bynum, G. A. Hackebeil, W. E. Hart, C. D. Laird, B. L. Nicholson,
+[7] Gurobi Optimization, LLC, *Gurobi Optimizer Reference Manual*, 2026.
+[gurobi.com](https://www.gurobi.com)
+
+[8] M. L. Bynum, G. A. Hackebeil, W. E. Hart, C. D. Laird, B. L. Nicholson,
 J. D. Siirola, J.-P. Watson, and D. L. Woodruff, *Pyomo — Optimization
 Modeling in Python*, 3rd ed. Cham: Springer, 2021.
 [Springer](https://link.springer.com/book/10.1007/978-3-030-68928-5)

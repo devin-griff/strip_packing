@@ -1,3 +1,4 @@
-streamlit~=1.30
-pyomo~=6.8
+streamlit==1.52.2
+pyomo~=6.10.0
 highspy~=1.14
+gurobipy~=13.0
