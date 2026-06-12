@@ -632,6 +632,15 @@ def remove_rect(data, rid):
     return data
 
 
+def _delete_rect(rid):
+    """on_click callback for the editor's per-row delete button. Runs
+    before the rerun renders anything, so the shortened list paints in
+    one clean pass instead of aborting the render mid-loop. Clears the
+    stored solve since the instance changed."""
+    st.session_state.data = remove_rect(dict(st.session_state.data), rid)
+    st.session_state.optimal = None
+
+
 def total_area(data):
     return sum(
         float(data["w"][i]) * float(data["length"][i]) for i in data["rects"]
@@ -1151,7 +1160,21 @@ def _render_rect_editor(data):
     header[3].markdown("")
 
     new_data = None
-    for idx, rid in enumerate(data["rects"], start=1):
+    # Fixed slot count: every rerun renders exactly MAX_RECTS row slots,
+    # with slots beyond the current rectangle count as invisible
+    # placeholders. Streamlit replaces elements positionally as deltas
+    # stream in but only sweeps TRAILING leftovers at end-of-run, so a
+    # rerun that shrinks the element count leaves the old last row
+    # visible for the whole round-trip — the ghost-row flash on delete
+    # that circle-packing exhibited. A constant element count removes
+    # the trailing leftover entirely. (Same pattern as circle-packing.)
+    n_rects = len(data["rects"])
+    for slot_idx in range(MAX_RECTS):
+        if slot_idx >= n_rects:
+            st.empty()
+            continue
+        rid = data["rects"][slot_idx]
+        idx = slot_idx + 1
         cols = st.columns(_editor_cols, vertical_alignment="center")
         color = _PALETTE[(int(idx) - 1) % len(_PALETTE)]
         cols[0].markdown(
@@ -1177,13 +1200,10 @@ def _render_rect_editor(data):
             key=f"l_{rid}_{ver}",
             label_visibility="collapsed",
         )
-        delete_clicked = cols[3].button(
+        cols[3].button(
             "🗑", key=f"del_{rid}_{ver}",
+            on_click=_delete_rect, args=(rid,),
         )
-        if delete_clicked:
-            st.session_state.data = remove_rect(dict(data), rid)
-            st.session_state.optimal = None
-            st.rerun()
         if new_w != data["w"][rid] or new_l != data["length"][rid]:
             new_data = dict(data)
             new_data["w"] = dict(new_data["w"]); new_data["w"][rid] = new_w
