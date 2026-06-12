@@ -695,12 +695,12 @@ def _render_top_metric(slot, label, value, suffix_html=""):
     # row hosts three radios plus five metrics, and 1.8rem buys the
     # difference without reading "small".
     slot.markdown(
-        "<div style='margin:0.25rem 0 1rem 0; line-height:1.2;'>"
+        "<div style='margin:0.25rem 0 0.3rem 0; line-height:1.2;'>"
         "<div style='font-size:0.8rem; color:rgba(49,51,63,0.6); "
         "margin-bottom:0.25rem; white-space:nowrap;'>"
         f"{label}"
         "</div>"
-        "<div style='font-size:1.8rem; font-weight:400; line-height:1.2; "
+        "<div style='font-size:1.8rem; font-weight:400; line-height:1.1; "
         "white-space:nowrap;'>"
         f"{value}{suffix_html}"
         "</div>"
@@ -787,6 +787,16 @@ def render_optimizer_tab():
                the radios wrapping — nine gutters at half a rem buys
                ~70px back. */
             gap: 0.5rem !important;
+        }
+        /* Unify the row's labels: Streamlit widget labels (the radios,
+           Strip width W) match the custom metric labels in size, color,
+           and the gap to the content below them. */
+        [data-testid="stMainBlockContainer"] [data-testid="stWidgetLabel"] p {
+            font-size: 0.8rem !important;
+            color: rgba(49, 51, 63, 0.6) !important;
+        }
+        [data-testid="stMainBlockContainer"] [data-testid="stWidgetLabel"] {
+            margin-bottom: 0.25rem !important;
         }
         /* st.number_input stretches to fill its column, so the W
            column could never show a gap before "MIP solver" no matter
