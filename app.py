@@ -1665,7 +1665,7 @@ with _caption_col:
     st.markdown(
         "Pack $N$ rectangles into a strip of fixed width $W$ to minimize "
         "the strip length $L$. Edit the object data directly on the "
-        "Optimizer tab. Pick a GDP transformation, solver and time "
+        "Optimizer tab. Pick a GDP transformation, solver, and time "
         "limit, then click **Solve**. The **Gap** is returned if the "
         "time limit is reached. The **Formulation** and **Logs** tabs "
         "show the underlying GDP and solver output."
