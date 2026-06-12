@@ -945,7 +945,7 @@ def render_optimizer_tab():
             )
         with top_row[4]:
             time_label = st.radio(
-                "Time limit (s)",
+                "Solve time limit (s)",
                 options=list(_TIME_LIMITS.keys()),
                 index=0,
                 horizontal=True,
