@@ -83,21 +83,21 @@ MAX_RECTS = 15
 
 # Default instance shown on first load and after the "Reset to defaults"
 # button. Fifteen rectangles produced by a random guillotine partition of
-# a 10 x 12 rectangle (search seed 1), so a perfect packing exists:
-# total area 120, optimum L = 12 at 100% efficiency. Ten distinct shapes
-# across three identical groups keep the identical-rectangle ordering
-# constraints active out of the box. Gurobi + Big-M proves optimality in
-# ~51 s on a workstation — inside the 60 s cap, barely — while HiGHS at
-# the default 10 s leaves a visible gap, so the solver comparison has a
-# story on first Solve.
+# a 10 x 12 rectangle (search seed 21), so a perfect packing exists:
+# total area 120, optimum L = 12 at 100% efficiency. Several identical
+# groups (including five 4x2 pieces) keep the identical-rectangle
+# ordering constraints active out of the box. Gurobi + Big-M proves
+# optimality in ~15 s on a workstation — comfortably inside the 60 s
+# cap — while HiGHS at the default 10 s leaves a visible gap, so the
+# solver comparison has a story on first Solve.
 DEFAULT_DATA = {
     "rects": list(range(1, 16)),
-    "w": {1: 5.0, 2: 5.0, 3: 5.0, 4: 5.0, 5: 3.0, 6: 3.0, 7: 3.0,
-          8: 3.0, 9: 2.0, 10: 2.0, 11: 2.0, 12: 2.0, 13: 1.0,
+    "w": {1: 6.0, 2: 6.0, 3: 4.0, 4: 4.0, 5: 4.0, 6: 4.0, 7: 4.0,
+          8: 4.0, 9: 4.0, 10: 4.0, 11: 4.0, 12: 4.0, 13: 2.0,
           14: 1.0, 15: 1.0},
-    "length": {1: 2.0, 2: 1.0, 3: 1.0, 4: 1.0, 5: 5.0, 6: 4.0, 7: 3.0,
-               8: 1.0, 9: 6.0, 10: 6.0, 11: 6.0, 12: 3.0, 13: 6.0,
-               14: 4.0, 15: 4.0},
+    "length": {1: 2.0, 2: 1.0, 3: 3.0, 4: 3.0, 5: 3.0, 6: 2.0, 7: 2.0,
+               8: 2.0, 9: 2.0, 10: 2.0, 11: 1.0, 12: 1.0, 13: 3.0,
+               14: 6.0, 15: 6.0},
     "W": 10.0,
 }
 
