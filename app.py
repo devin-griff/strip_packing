@@ -696,7 +696,7 @@ def _render_top_metric(slot, label, value, suffix_html=""):
     # difference without reading "small".
     slot.markdown(
         "<div style='margin:0.25rem 0 0.3rem 0; line-height:1.2;'>"
-        "<div style='font-size:0.8rem; color:rgba(49,51,63,0.6); "
+        "<div style='font-size:0.875rem; "
         "margin-bottom:0.25rem; white-space:nowrap;'>"
         f"{label}"
         "</div>"
@@ -788,13 +788,8 @@ def render_optimizer_tab():
                ~70px back. */
             gap: 0.5rem !important;
         }
-        /* Unify the row's labels: Streamlit widget labels (the radios,
-           Strip width W) match the custom metric labels in size, color,
-           and the gap to the content below them. */
-        [data-testid="stMainBlockContainer"] [data-testid="stWidgetLabel"] p {
-            font-size: 0.8rem !important;
-            color: rgba(49, 51, 63, 0.6) !important;
-        }
+        /* Keep the gap between a widget's label and its content equal
+           to the metric blocks' label gap so the rows align. */
         [data-testid="stMainBlockContainer"] [data-testid="stWidgetLabel"] {
             margin-bottom: 0.25rem !important;
         }
