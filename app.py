@@ -1664,15 +1664,11 @@ _caption_col, _ = st.columns([5, 3])
 with _caption_col:
     st.markdown(
         "Pack $N$ rectangles into a strip of fixed width $W$ to minimize "
-        "the strip length $L$. Edit the rectangle list directly on the "
-        "Optimizer tab, pick a GDP transformation (Big-M, Hull) below, "
-        "and click **Solve**. "
-        "Non-overlap is written as **disjunctions** (`pyomo.gdp`) and "
-        "reformulated to a MILP for HiGHS or Gurobi under a selectable "
-        "**10–60 s** time cap — if the solver doesn't prove optimality "
-        "in that window, the best feasible packing is shown alongside "
-        "the remaining **Gap**. The **Formulation** and **Logs** tabs show "
-        "the underlying GDP and solver output."
+        "the strip length $L$. Edit the object data directly on the "
+        "Optimizer tab. Pick a GDP transformation, solver and time "
+        "limit, then click **Solve**. The **Gap** is returned if the "
+        "time limit is reached. The **Formulation** and **Logs** tabs "
+        "show the underlying GDP and solver output."
     )
 
 # Three tabs for the three views of the problem.
