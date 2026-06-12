@@ -923,7 +923,7 @@ def render_optimizer_tab():
         # colored_metric proportions), tolerating the same mild label
         # overflow the original single-radio layout had.
         top_row = st.columns(
-            [0.7, 1.6, 1.55, 1.7, 1.7, 1.0, 1.0, 1.0, 1.0, 0.95],
+            [0.7, 1.6, 1.7, 1.7, 1.7, 0.97, 0.97, 0.97, 0.97, 0.92],
             vertical_alignment="bottom",
         )
         with top_row[0]:
