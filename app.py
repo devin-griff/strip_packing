@@ -11,7 +11,8 @@
 # (i, j), at least one of four geometric relationships must hold:
 #     i is left of j, i is right of j, i is below j, or i is above j.
 # Pyomo's `gdp` module expresses these `Disjunction` blocks natively. A
-# `TransformationFactory` step (Big-M or Hull) reformulates the GDP into a
+# `TransformationFactory` step (Big-M, Multiple Big-M, or Hull)
+# reformulates the GDP into a
 # standard MILP that HiGHS can solve.
 #
 # Library roadmap:
@@ -82,33 +83,41 @@ _materialize_gurobi_license()
 MAX_RECTS = 15
 
 # Default instance shown on first load and after the "Reset to defaults"
-# button. A representative 8-rectangle problem with mixed shapes — some tall,
-# some wide, some square — so the optimal layout is visually interesting.
+# button. A random 15-rectangle instance (random.Random(124), w ~ U{1..6},
+# length ~ U{1..7}) chosen for variety: widths 1-5, lengths 1-7, total
+# area 118 (geometric lower bound L >= 11.8), and one identical group —
+# rectangles 6, 12, 14 are all 4x2 — so the identical-rectangle ordering
+# constraints are active out of the box. At N = 15 neither solver proves
+# optimality inside the default 10 s cap, which is the point: the Gap
+# metric has a story to tell on first Solve.
 DEFAULT_DATA = {
-    "rects": [1, 2, 3, 4, 5, 6, 7, 8],
-    "w": {1: 2.0, 2: 3.0, 3: 4.0, 4: 5.0, 5: 2.0, 6: 3.0, 7: 6.0, 8: 1.0},
-    "length": {1: 6.0, 2: 4.0, 3: 2.0, 4: 3.0, 5: 5.0, 6: 3.0, 7: 2.0, 8: 7.0},
+    "rects": list(range(1, 16)),
+    "w": {1: 3.0, 2: 5.0, 3: 1.0, 4: 2.0, 5: 1.0, 6: 4.0, 7: 3.0, 8: 3.0,
+          9: 1.0, 10: 3.0, 11: 2.0, 12: 4.0, 13: 3.0, 14: 4.0, 15: 1.0},
+    "length": {1: 5.0, 2: 4.0, 3: 5.0, 4: 4.0, 5: 1.0, 6: 2.0, 7: 2.0,
+               8: 1.0, 9: 4.0, 10: 3.0, 11: 2.0, 12: 2.0, 13: 4.0,
+               14: 2.0, 15: 7.0},
     "W": 10.0,
 }
 
-# GDP → MILP transformations offered via the radio above the strip on the
-# Optimizer tab — the classical Big-M / Hull pair, both
-# TransformationFactory entries in pyomo.gdp. (Multiple Big-M was offered
-# for a while and dropped: on strip packing its per-constraint M
-# tightening costs seconds of LP subproblems and provably can't move the
-# bound — the relaxation's weakness is the disjunctive geometry, not
-# loose M values.)
+# GDP → MILP transformations offered via the radio above the strip on
+# the Optimizer tab — all TransformationFactory entries in pyomo.gdp.
+# Multiple Big-M solves LP subproblems to tighten each per-constraint M;
+# under the S2 disjuncts its MILP genuinely differs from plain Big-M
+# (with the classic model they coincide), so it earns its slot as long
+# as the tighter relaxation shows up in the Gap within the time caps.
 _GDP_TRANSFORMS = {
     "Big-M": "gdp.bigm",
+    "Multiple Big-M": "gdp.mbigm",
     "Hull": "gdp.hull",
 }
 _GDP_LABEL = {v: k for k, v in _GDP_TRANSFORMS.items()}
 
 # MIP solver choices for the Optimizer tab radio. Both consume the same
-# GDP-reformulated MILP and the same 10 s cap; HiGHS is the open-source
-# default (pip wheel, no license), Gurobi the commercial comparison —
-# licensed via Gurobi's Web License Service, with a seat checked out per
-# solve and released immediately after.
+# GDP-reformulated MILP under the same selectable time cap; HiGHS is the
+# open-source default (pip wheel, no license), Gurobi the commercial
+# comparison — licensed via Gurobi's Web License Service, with a seat
+# checked out per solve and released immediately after.
 _MIP_SOLVERS = {"HiGHS": "appsi_highs", "Gurobi": "appsi_gurobi"}
 
 
@@ -230,17 +239,35 @@ def build_model(data):
     return m
 
 
-# Hard cap on the MIP master solve (HiGHS or Gurobi). Large instances
+# Default cap on the MIP master solve (HiGHS or Gurobi). Large instances
 # (especially with Big-M on N close to MAX_RECTS) can take much longer
-# than this in the worst case; cutting off at 10 s keeps the UI
-# responsive and surfaces the optimality gap when the solver doesn't
-# converge.
+# than this in the worst case; cutting off keeps the UI responsive and
+# surfaces the optimality gap when the solver doesn't converge. The user
+# can raise the cap via the Time limit select on the Optimizer tab —
+# bounded at 60 s so a public visitor can't pin the page (or a Gurobi
+# WLS seat) for minutes.
 SOLVE_TIME_LIMIT_S = 10.0
+_TIME_LIMITS = {"10": 10.0, "30": 30.0, "60": 60.0}
 
 # Below this relative gap, treat the solve as effectively optimal (the
 # default HiGHS MIP gap tolerance is 0.01% = 1e-4; we use a tiny bit
 # higher to absorb floating-point noise).
 GAP_OPTIMAL_THRESHOLD_PCT = 0.05
+
+
+def _ensure_pyomo_thread_locals():
+    """Workaround for a Pyomo bug. pyomo/gdp/plugins/multiple_bigm.py's
+    `_apply_to` opens with `if _thread_local.in_progress: raise ...`
+    without first lazy-initializing the attribute, so the first Multiple
+    Big-M solve on a fresh Streamlit worker thread dies with
+    AttributeError. Pre-initialize the flag; harmless if upstream fixes
+    it."""
+    try:
+        from pyomo.gdp.plugins import multiple_bigm as _mbigm
+        if not hasattr(_mbigm._thread_local, "in_progress"):
+            _mbigm._thread_local.in_progress = False
+    except Exception:
+        pass
 
 
 class _LicenseBusyError(RuntimeError):
@@ -249,7 +276,8 @@ class _LicenseBusyError(RuntimeError):
     taken. solve() maps this onto the `license_busy` status."""
 
 
-def _solve_capturing(m, transform, solver_name="appsi_highs"):
+def _solve_capturing(m, transform, solver_name="appsi_highs",
+                     time_limit_s=SOLVE_TIME_LIMIT_S):
     """Apply the GDP transformation, run the chosen MIP solver, and
     return (termination_condition, gap_pct, log_text, elapsed) with the
     solution (if any) loaded onto `m`. Captures the solver's stdout via
@@ -270,17 +298,41 @@ def _solve_capturing(m, transform, solver_name="appsi_highs"):
     # Reformulate the GDP into a standard MILP. Big-M replaces each
     # disjunct constraint with a linearization that goes vacuous unless
     # the disjunct's indicator is selected; Hull adds disaggregated
-    # variable copies for a tighter (convex-hull) relaxation. Neither
-    # touches a solver, so the transformation is fast and license-free.
+    # variable copies for a tighter (convex-hull) relaxation. Those two
+    # never touch a solver. Multiple Big-M additionally solves LP
+    # subproblems to tighten each per-constraint M; they follow the
+    # selected master solver, serial and in-process (threads=1 — Pyomo
+    # 6.10's default multiprocessing pool for them is broken on Windows
+    # spawn, and the subproblems are tiny LPs where spawn overhead
+    # dwarfs any parallelism; in-process also means Gurobi subproblems
+    # share ONE WLS checkout with the master via gurobipy's default
+    # environment, released once at the end of the solve).
+    _ensure_pyomo_thread_locals()
     t0 = time.perf_counter()
-    pyo.TransformationFactory(transform).apply_to(m)
+    sub_solver = None
+    if transform == "gdp.mbigm":
+        sub_solver = pyo.SolverFactory(solver_name)
+        apply_kwargs = {"solver": sub_solver, "threads": 1}
+    else:
+        apply_kwargs = {}
+    try:
+        pyo.TransformationFactory(transform).apply_to(m, **apply_kwargs)
+    except Exception:
+        # On a failed transformation, free the WLS seat before
+        # propagating — nothing downstream will.
+        if sub_solver is not None and solver_name == "appsi_gurobi":
+            try:
+                sub_solver.release_license()
+            except Exception:
+                pass
+        raise
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         if solver_name == "appsi_gurobi":
-            tc, gap_pct = _run_gurobi(m)
+            tc, gap_pct = _run_gurobi(m, time_limit_s)
         else:
-            tc, gap_pct = _run_highs(m)
+            tc, gap_pct = _run_highs(m, time_limit_s)
     # Scrub license-identifying lines from the captured log before it
     # reaches the public Logs tab — Gurobi's WLS banner prints the
     # license ID and registrant ("WLS license NNNNNNN - registered to
@@ -297,12 +349,12 @@ def _solve_capturing(m, transform, solver_name="appsi_highs"):
     return tc, gap_pct, log_text, elapsed
 
 
-def _run_highs(m):
+def _run_highs(m, time_limit_s=SOLVE_TIME_LIMIT_S):
     """Master solve via the legacy appsi_highs wrapper. Returns
     (termination_condition, gap_pct); solution loaded onto m when an
     incumbent exists."""
     solver = pyo.SolverFactory("appsi_highs")
-    solver.options["time_limit"] = SOLVE_TIME_LIMIT_S
+    solver.options["time_limit"] = time_limit_s
     # When HiGHS hits the time cap without finding any feasible
     # solution (e.g. Hull on N=15), the default solve(load_solutions=
     # True) path raises RuntimeError because there's nothing to load.
@@ -313,7 +365,7 @@ def _run_highs(m):
     return results.solver.termination_condition, _extract_gap_pct(results)
 
 
-def _run_gurobi(m):
+def _run_gurobi(m, time_limit_s=SOLVE_TIME_LIMIT_S):
     """Master solve via the NATIVE appsi Gurobi interface. Returns
     (termination_condition mapped onto the legacy enum, gap_pct);
     solution loaded onto m when an incumbent exists.
@@ -323,11 +375,12 @@ def _run_gurobi(m):
     churn in seconds, so one checkout collision gets a quiet retry
     before surfacing as license_busy — and the seat is ALWAYS released
     afterward, since holding it would pin license capacity to this
-    machine between solves."""
+    machine between solves. (The seat is held for the duration of the
+    solve, which is why the user-selectable time limit is bounded.)"""
     from pyomo.contrib.appsi.solvers import Gurobi as AppsiGurobi
 
     opt = AppsiGurobi()
-    opt.config.time_limit = SOLVE_TIME_LIMIT_S
+    opt.config.time_limit = time_limit_s
     opt.config.load_solution = False
     opt.config.stream_solver = True  # log into the redirected stdout
     try:
@@ -430,7 +483,8 @@ def _extract_gap_pct(results):
     return max(0.0, (primal - dual) / primal * 100.0)
 
 
-def solve(data, transform="gdp.bigm", solver_name="appsi_highs"):
+def solve(data, transform="gdp.bigm", solver_name="appsi_highs",
+          time_limit_s=SOLVE_TIME_LIMIT_S):
     # Top-level entrypoint used by the UI. Always returns a plain dict so the
     # caller can stash the result in session_state without holding on to a
     # live Pyomo model.
@@ -457,7 +511,8 @@ def solve(data, transform="gdp.bigm", solver_name="appsi_highs"):
     m = build_model(data)
 
     try:
-        tc, gap_pct, log, elapsed = _solve_capturing(m, transform, solver_name)
+        tc, gap_pct, log, elapsed = _solve_capturing(
+            m, transform, solver_name, time_limit_s)
     except _LicenseBusyError:
         return {
             "status": "license_busy",
@@ -509,11 +564,12 @@ def solve(data, transform="gdp.bigm", solver_name="appsi_highs"):
         except Exception:
             return {"status": "no_incumbent", "x": {}, "y": {}, "L": None,
                     "gap_pct": gap_pct, "log": log, "transform": transform,
-                    "elapsed": elapsed}
+                    "elapsed": elapsed, "time_limit_s": time_limit_s}
         return {
             "status": "optimal",
             "x": x, "y": y, "L": L, "gap_pct": gap_pct,
             "log": log, "transform": transform, "elapsed": elapsed,
+            "time_limit_s": time_limit_s,
         }
     if tc == TerminationCondition.maxTimeLimit:
         # Feasible incumbent expected (the LP root is always feasible for
@@ -524,11 +580,12 @@ def solve(data, transform="gdp.bigm", solver_name="appsi_highs"):
         except Exception:
             return {"status": "no_incumbent", "x": {}, "y": {}, "L": None,
                     "gap_pct": gap_pct, "log": log, "transform": transform,
-                    "elapsed": elapsed}
+                    "elapsed": elapsed, "time_limit_s": time_limit_s}
         return {
             "status": "time_limit",
             "x": x, "y": y, "L": L, "gap_pct": gap_pct,
             "log": log, "transform": transform, "elapsed": elapsed,
+            "time_limit_s": time_limit_s,
         }
     if tc in (
         TerminationCondition.infeasible,
@@ -556,6 +613,7 @@ def solve(data, transform="gdp.bigm", solver_name="appsi_highs"):
 #   - W_input:             value backing the inline strip-width number_input
 #   - transform_radio:     value backing the inline GDP-transformation radio
 #   - solver_radio:        value backing the inline MIP-solver radio
+#   - time_limit_radio:    value backing the inline time-limit radio
 #   - _rect_editor_ver:    counter bumped on Reset so per-rectangle stepper
 #                          widget keys re-init instead of holding stale state
 #   - w_{rid}_{ver} / l_{rid}_{ver} / del_{rid}_{ver}:
@@ -675,16 +733,16 @@ def _render_top_metric(slot, label, value, suffix_html=""):
     `white-space: nowrap` on both label and value keeps each metric
     on a single line per row (otherwise "100.0%" or "Efficiency"
     wrap in narrow columns)."""
-    # Fonts run smaller than diet's original colored_metric (1.5rem value
-    # vs 2.25rem) because the top row now also hosts the MIP-solver radio
-    # — the five metric columns absorbed the squeeze.
+    # Value font runs a notch under diet's 2.25rem original — the top
+    # row hosts three radios plus five metrics, and 1.8rem buys the
+    # difference without reading "small".
     slot.markdown(
         "<div style='margin:0.25rem 0 1rem 0; line-height:1.2;'>"
-        "<div style='font-size:0.75rem; color:rgba(49,51,63,0.6); "
+        "<div style='font-size:0.8rem; color:rgba(49,51,63,0.6); "
         "margin-bottom:0.25rem; white-space:nowrap;'>"
         f"{label}"
         "</div>"
-        "<div style='font-size:1.5rem; font-weight:400; line-height:1.2; "
+        "<div style='font-size:1.8rem; font-weight:400; line-height:1.2; "
         "white-space:nowrap;'>"
         f"{value}{suffix_html}"
         "</div>"
@@ -766,6 +824,29 @@ def render_optimizer_tab():
         [data-testid="stMainBlockContainer"]
             [data-testid="stHorizontalBlock"] {
             margin-bottom: -0.75rem;
+            /* Streamlit's default 1rem column gap is the difference
+               between the ten-item control row fitting on one line and
+               the radios wrapping — nine gutters at half a rem buys
+               ~70px back. */
+            gap: 0.5rem !important;
+        }
+        /* st.number_input stretches to fill its column, so the W
+           column could never show a gap before "MIP solver" no matter
+           the column weights — every other group's gap comes from its
+           natural content width. Cap the W input so it behaves like
+           the radios and the inter-group spacing evens out. (st-key-*
+           classes come from the widget's key.) */
+        .st-key-W_input {
+            max-width: 8.5rem;
+        }
+        /* Same story inside the radio groups: tighten the spacing
+           between options so three-option groups (Time limit) hold one
+           line in their column. */
+        div[role="radiogroup"] {
+            gap: 0.4rem !important;
+        }
+        div[role="radiogroup"] label {
+            margin-right: 0 !important;
         }
         [data-testid="stNumberInputContainer"] input {
             padding-top: 0.25rem; padding-bottom: 0.25rem;
@@ -842,7 +923,7 @@ def render_optimizer_tab():
     # ── Two-column layout: editor (left) | strip column fills remainder ──
     # The metric column is gone — metrics now live in a sub-row above the
     # strip, so the strip itself can stretch to the right edge of the page.
-    editor_col, strip_col = st.columns([3, 9])
+    editor_col, strip_col = st.columns([2.7, 9.3])
 
     # Render the editor in the left column (its edits commit + rerun on
     # change, so we don't need a placeholder for it).
@@ -863,13 +944,14 @@ def render_optimizer_tab():
         # buttons have room to sit inline beside the input — at
         # weight 1 the column was too narrow and the steppers wrapped
         # to a second line as a thin teal bar.
-        # Column order: Solve / W / MIP solver / GDP transformation /
-        # 5 metric slots. The radios get the widths their option rows
-        # actually need (two options each now that Multiple Big-M is
-        # gone) and the metrics keep the smaller fonts from
-        # _render_top_metric.
+        # Column order: Solve / W / GDP transformation / MIP solver /
+        # Time limit / 5 metric slots. The radios get the widths their
+        # two-option rows actually need, the time-limit selectbox stays
+        # compact, and metrics render at full size (diet's
+        # colored_metric proportions), tolerating the same mild label
+        # overflow the original single-radio layout had.
         top_row = st.columns(
-            [0.9, 1.7, 2.5, 2.4, 1.0, 1.0, 1.0, 1.0, 1.0],
+            [0.7, 1.6, 2.75, 1.7, 1.7, 0.85, 0.85, 0.85, 0.85, 0.85],
             vertical_alignment="bottom",
         )
         with top_row[0]:
@@ -886,26 +968,8 @@ def render_optimizer_tab():
                 value=int(current_W),
                 step=1,
                 key="W_input",
-                help=(
-                    "Strip width is bounded below by the widest rectangle "
-                    f"(currently {min_W:g}) — narrower would be infeasible."
-                ),
             )
         with top_row[2]:
-            solver_label = st.radio(
-                "MIP solver",
-                options=list(_MIP_SOLVERS.keys()),
-                index=0,
-                horizontal=True,
-                key="solver_radio",
-                help=(
-                    "Both solve the same reformulated MILP under the same "
-                    f"{SOLVE_TIME_LIMIT_S:g} s cap. HiGHS is open-source; "
-                    "Gurobi is commercial — compare the Gap each leaves "
-                    "on harder instances."
-                ),
-            )
-        with top_row[3]:
             transform_label = st.radio(
                 "GDP transformation",
                 options=list(_GDP_TRANSFORMS.keys()),
@@ -913,11 +977,27 @@ def render_optimizer_tab():
                 horizontal=True,
                 key="transform_radio",
             )
-        ub_slot = top_row[4].empty()
-        opt_slot = top_row[5].empty()
-        eff_slot = top_row[6].empty()
-        gap_slot = top_row[7].empty()
-        time_slot = top_row[8].empty()
+        with top_row[3]:
+            solver_label = st.radio(
+                "MIP solver",
+                options=list(_MIP_SOLVERS.keys()),
+                index=0,
+                horizontal=True,
+                key="solver_radio",
+            )
+        with top_row[4]:
+            time_label = st.radio(
+                "Time limit (s)",
+                options=list(_TIME_LIMITS.keys()),
+                index=0,
+                horizontal=True,
+                key="time_limit_radio",
+            )
+        ub_slot = top_row[5].empty()
+        opt_slot = top_row[6].empty()
+        eff_slot = top_row[7].empty()
+        gap_slot = top_row[8].empty()
+        time_slot = top_row[9].empty()
         strip_slot = st.empty()
         # Dedicated slot for the "Solving..." spinner so it can appear
         # just below the strip without replacing the strip itself.
@@ -927,6 +1007,7 @@ def render_optimizer_tab():
 
     transform_key = _GDP_TRANSFORMS[transform_label]
     solver_key = _MIP_SOLVERS[solver_label]
+    time_limit_s = _TIME_LIMITS[time_label]
 
     # Commit any change to W back into data before painting the strip.
     if abs(float(W_value) - float(data["W"])) > 1e-12:
@@ -946,7 +1027,7 @@ def render_optimizer_tab():
         # the spinner_slot so it reverts to zero height.
         with spinner_slot.container():
             with st.spinner(f"Solving GDP-transformed MILP via {solver_label}..."):
-                result = solve(data, transform_key, solver_key)
+                result = solve(data, transform_key, solver_key, time_limit_s)
         spinner_slot.empty()
         st.session_state.optimal = result
         optimal = result
@@ -1026,10 +1107,11 @@ def render_optimizer_tab():
             elif optimal["status"] == "unbounded":
                 st.error("Unbounded problem.")
             elif optimal["status"] == "no_incumbent":
+                _cap = optimal.get("time_limit_s", SOLVE_TIME_LIMIT_S)
                 st.warning(
-                    f"Hit the {SOLVE_TIME_LIMIT_S:g} s solve cap before "
-                    "finding any feasible packing. Try a smaller instance "
-                    "or a different transformation."
+                    f"Hit the {_cap:g} s solve cap before finding any "
+                    "feasible packing. Try a smaller instance, a longer "
+                    "time limit, or a different transformation."
                 )
             elif optimal["status"] == "license_busy":
                 st.error(
@@ -1052,8 +1134,9 @@ def render_optimizer_tab():
     if proved_optimal:
         _render_top_metric(opt_slot, "Optimal length", f"{opt_L:.0f}")
     elif has_incumbent:
+        _cap = optimal.get("time_limit_s", SOLVE_TIME_LIMIT_S)
         tooltip = (
-            f"Solver hit the {SOLVE_TIME_LIMIT_S:g} s time cap before "
+            f"Solver hit the {_cap:g} s time cap before "
             "proving optimality. This is the best feasible packing "
             "found so far; see Gap for how far it could still tighten."
         )
@@ -1080,9 +1163,10 @@ def render_optimizer_tab():
     else:
         _render_top_metric(gap_slot, "Gap", f"{gap_pct:.1f}%")
     # "Total time" not "Solve time": this is wall-clock time for the
-    # GDP transformation + master solve combined. The 10 s cap applies
-    # only to the solver; transformation time (small for Big-M / Hull)
-    # rides on top.
+    # GDP transformation + master solve combined. The selected time cap
+    # applies only to the solver; transformation time (small for Big-M /
+    # Hull, several seconds of LP subproblems for Multiple Big-M) rides
+    # on top.
     _render_top_metric(
         time_slot, "Total time",
         f"{elapsed:.2f} s" if isinstance(elapsed, (int, float)) else "—",
@@ -1160,7 +1244,7 @@ def _render_rect_editor(data):
             help=(
                 None
                 if can_add
-                else f"Max {MAX_RECTS} rectangles (Big-M MILP gets slow beyond this)."
+                else f"Max {MAX_RECTS} rectangles."
             ),
         ):
             st.session_state.data = add_rect(dict(data))
@@ -1308,6 +1392,17 @@ $$
             "variables; the LP relaxation is often loose."
         )
         st.markdown(
+            "- **Multiple Big-M**: the same shape as Big-M, but every "
+            "constraint gets its own per-constraint $M$, each computed "
+            "tight by solving small LP subproblems over the other "
+            "disjuncts. The transformation itself costs seconds — watch "
+            "Total time — and on the *classic* model it provably "
+            "coincides with plain Big-M here. With the "
+            "degeneracy-breaking disjuncts, though, the relaxation "
+            "genuinely tightens: give it a long enough time limit and "
+            "it can be the difference between a Gap and a proof."
+        )
+        st.markdown(
             "- **Hull (convex hull / disaggregated)**: introduces "
             "disaggregated copies of each variable, one per disjunct, with "
             "scaled bounds. More variables and constraints, but the LP "
@@ -1321,7 +1416,8 @@ $$
             "runs branch-and-bound: relax the binary disjunct indicators "
             "$z_k$ to $[0, 1]$, solve the resulting LP, and either accept "
             "the solution if all indicators are integer or branch on a "
-            "fractional one. Either solver is capped at 10 s — if it can't "
+            "fractional one. Either solver runs under the selected time cap "
+            "(10 s default) — if it can't "
             "prove optimality in that time, the Optimizer tab labels the "
             "result **Best length** instead of *Optimal length* and "
             "surfaces the remaining optimality **Gap**. HiGHS is a modern "
@@ -1449,7 +1545,8 @@ $$
             st.caption(
                 f"This is one of the {n_disj} pairwise disjunctions in "
                 "the model; the GDP transformation rewrites each one "
-                "into standard MILP constraints (Big-M / Hull). The "
+                "into standard MILP constraints (Big-M / Multiple Big-M / Hull). "
+                "The "
                 "lengthwise-overlap inequalities in the first two terms "
                 "are the degeneracy-breaking refinement — without them, "
                 "a diagonally-separated pair satisfies two terms at "
@@ -1625,13 +1722,14 @@ with _caption_col:
     st.markdown(
         "Pack $N$ rectangles into a strip of fixed width $W$ to minimize "
         "the strip length $L$. Edit the rectangle list directly on the "
-        "Optimizer tab, pick a GDP transformation (Big-M, Hull) below, "
+        "Optimizer tab, pick a GDP transformation (Big-M, Multiple Big-M, "
+        "Hull) below, "
         "and click **Solve**. "
         "Non-overlap is written as **disjunctions** (`pyomo.gdp`) and "
-        "reformulated to a MILP for HiGHS or Gurobi, capped at **10 s** "
-        "of solve time — if the solver doesn't prove optimality in that "
-        "window, the best feasible packing is shown alongside the "
-        "remaining **Gap**. The **Formulation** and **Logs** tabs show "
+        "reformulated to a MILP for HiGHS or Gurobi under a selectable "
+        "**10–60 s** time cap — if the solver doesn't prove optimality "
+        "in that window, the best feasible packing is shown alongside "
+        "the remaining **Gap**. The **Formulation** and **Logs** tabs show "
         "the underlying GDP and solver output."
     )
 
