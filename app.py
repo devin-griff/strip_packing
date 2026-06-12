@@ -695,7 +695,7 @@ def _render_top_metric(slot, label, value, suffix_html=""):
     # row hosts three radios plus five metrics, and 1.8rem buys the
     # difference without reading "small".
     slot.markdown(
-        "<div style='margin:0.25rem 0 0.3rem 0; line-height:1.2;'>"
+        "<div style='margin:0.25rem 0 1.65rem 0; line-height:1.2;'>"
         "<div style='font-size:0.875rem; "
         "margin-bottom:0.25rem; white-space:nowrap;'>"
         f"{label}"
