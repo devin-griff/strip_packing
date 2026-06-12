@@ -101,14 +101,7 @@ DEFAULT_DATA = {
 
 # GDP → MILP transformations offered via the radio above the strip on
 # the Optimizer tab — the classical Big-M / Hull pair, both
-# TransformationFactory entries in pyomo.gdp. (Multiple Big-M was tried
-# twice and dropped for good: its ~2,500 M-tightening LP subproblems
-# cost ~12 s of CPU locally, which is 6-8 MINUTES of wall-clock on the
-# throttled shared-cpu-1x production machine — an unusable spinner on a
-# public demo, even though under the S2 disjuncts the tightening
-# genuinely helps given a big enough time budget — mbigm + Gurobi at a
-# 60 s cap was the only configuration that PROVED the default instance
-# optimal on a workstation. Revive it only with dedicated-CPU hosting.)
+# TransformationFactory entries in pyomo.gdp.
 _GDP_TRANSFORMS = {
     "Big-M": "gdp.bigm",
     "Hull": "gdp.hull",
