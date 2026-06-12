@@ -11,8 +11,7 @@
 # (i, j), at least one of four geometric relationships must hold:
 #     i is left of j, i is right of j, i is below j, or i is above j.
 # Pyomo's `gdp` module expresses these `Disjunction` blocks natively. A
-# `TransformationFactory` step (Big-M, Multiple Big-M, or Hull)
-# reformulates the GDP into a
+# `TransformationFactory` step (Big-M or Hull) reformulates the GDP into a
 # standard MILP that HiGHS can solve.
 #
 # Library roadmap:
@@ -101,14 +100,17 @@ DEFAULT_DATA = {
 }
 
 # GDP → MILP transformations offered via the radio above the strip on
-# the Optimizer tab — all TransformationFactory entries in pyomo.gdp.
-# Multiple Big-M solves LP subproblems to tighten each per-constraint M;
-# under the S2 disjuncts its MILP genuinely differs from plain Big-M
-# (with the classic model they coincide), so it earns its slot as long
-# as the tighter relaxation shows up in the Gap within the time caps.
+# the Optimizer tab — the classical Big-M / Hull pair, both
+# TransformationFactory entries in pyomo.gdp. (Multiple Big-M was tried
+# twice and dropped for good: its ~2,500 M-tightening LP subproblems
+# cost ~12 s of CPU locally, which is 6-8 MINUTES of wall-clock on the
+# throttled shared-cpu-1x production machine — an unusable spinner on a
+# public demo, even though under the S2 disjuncts the tightening
+# genuinely helps given a big enough time budget — mbigm + Gurobi at a
+# 60 s cap was the only configuration that PROVED the default instance
+# optimal on a workstation. Revive it only with dedicated-CPU hosting.)
 _GDP_TRANSFORMS = {
     "Big-M": "gdp.bigm",
-    "Multiple Big-M": "gdp.mbigm",
     "Hull": "gdp.hull",
 }
 _GDP_LABEL = {v: k for k, v in _GDP_TRANSFORMS.items()}
@@ -255,21 +257,6 @@ _TIME_LIMITS = {"10": 10.0, "30": 30.0, "60": 60.0}
 GAP_OPTIMAL_THRESHOLD_PCT = 0.05
 
 
-def _ensure_pyomo_thread_locals():
-    """Workaround for a Pyomo bug. pyomo/gdp/plugins/multiple_bigm.py's
-    `_apply_to` opens with `if _thread_local.in_progress: raise ...`
-    without first lazy-initializing the attribute, so the first Multiple
-    Big-M solve on a fresh Streamlit worker thread dies with
-    AttributeError. Pre-initialize the flag; harmless if upstream fixes
-    it."""
-    try:
-        from pyomo.gdp.plugins import multiple_bigm as _mbigm
-        if not hasattr(_mbigm._thread_local, "in_progress"):
-            _mbigm._thread_local.in_progress = False
-    except Exception:
-        pass
-
-
 class _LicenseBusyError(RuntimeError):
     """Raised when Gurobi's WLS checkout fails even after a retry —
     typically because the license's concurrent-session seats are all
@@ -298,34 +285,10 @@ def _solve_capturing(m, transform, solver_name="appsi_highs",
     # Reformulate the GDP into a standard MILP. Big-M replaces each
     # disjunct constraint with a linearization that goes vacuous unless
     # the disjunct's indicator is selected; Hull adds disaggregated
-    # variable copies for a tighter (convex-hull) relaxation. Those two
-    # never touch a solver. Multiple Big-M additionally solves LP
-    # subproblems to tighten each per-constraint M; they follow the
-    # selected master solver, serial and in-process (threads=1 — Pyomo
-    # 6.10's default multiprocessing pool for them is broken on Windows
-    # spawn, and the subproblems are tiny LPs where spawn overhead
-    # dwarfs any parallelism; in-process also means Gurobi subproblems
-    # share ONE WLS checkout with the master via gurobipy's default
-    # environment, released once at the end of the solve).
-    _ensure_pyomo_thread_locals()
+    # variable copies for a tighter (convex-hull) relaxation. Neither
+    # touches a solver, so the transformation is fast and license-free.
     t0 = time.perf_counter()
-    sub_solver = None
-    if transform == "gdp.mbigm":
-        sub_solver = pyo.SolverFactory(solver_name)
-        apply_kwargs = {"solver": sub_solver, "threads": 1}
-    else:
-        apply_kwargs = {}
-    try:
-        pyo.TransformationFactory(transform).apply_to(m, **apply_kwargs)
-    except Exception:
-        # On a failed transformation, free the WLS seat before
-        # propagating — nothing downstream will.
-        if sub_solver is not None and solver_name == "appsi_gurobi":
-            try:
-                sub_solver.release_license()
-            except Exception:
-                pass
-        raise
+    pyo.TransformationFactory(transform).apply_to(m)
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -951,7 +914,7 @@ def render_optimizer_tab():
         # colored_metric proportions), tolerating the same mild label
         # overflow the original single-radio layout had.
         top_row = st.columns(
-            [0.7, 1.6, 2.75, 1.7, 1.7, 0.85, 0.85, 0.85, 0.85, 0.85],
+            [0.7, 1.6, 1.55, 1.7, 1.7, 1.0, 1.0, 1.0, 1.0, 0.95],
             vertical_alignment="bottom",
         )
         with top_row[0]:
@@ -1165,8 +1128,7 @@ def render_optimizer_tab():
     # "Total time" not "Solve time": this is wall-clock time for the
     # GDP transformation + master solve combined. The selected time cap
     # applies only to the solver; transformation time (small for Big-M /
-    # Hull, several seconds of LP subproblems for Multiple Big-M) rides
-    # on top.
+    # Hull) rides on top.
     _render_top_metric(
         time_slot, "Total time",
         f"{elapsed:.2f} s" if isinstance(elapsed, (int, float)) else "—",
@@ -1392,17 +1354,6 @@ $$
             "variables; the LP relaxation is often loose."
         )
         st.markdown(
-            "- **Multiple Big-M**: the same shape as Big-M, but every "
-            "constraint gets its own per-constraint $M$, each computed "
-            "tight by solving small LP subproblems over the other "
-            "disjuncts. The transformation itself costs seconds — watch "
-            "Total time — and on the *classic* model it provably "
-            "coincides with plain Big-M here. With the "
-            "degeneracy-breaking disjuncts, though, the relaxation "
-            "genuinely tightens: give it a long enough time limit and "
-            "it can be the difference between a Gap and a proof."
-        )
-        st.markdown(
             "- **Hull (convex hull / disaggregated)**: introduces "
             "disaggregated copies of each variable, one per disjunct, with "
             "scaled bounds. More variables and constraints, but the LP "
@@ -1545,8 +1496,7 @@ $$
             st.caption(
                 f"This is one of the {n_disj} pairwise disjunctions in "
                 "the model; the GDP transformation rewrites each one "
-                "into standard MILP constraints (Big-M / Multiple Big-M / Hull). "
-                "The "
+                "into standard MILP constraints (Big-M / Hull). The "
                 "lengthwise-overlap inequalities in the first two terms "
                 "are the degeneracy-breaking refinement — without them, "
                 "a diagonally-separated pair satisfies two terms at "
@@ -1722,8 +1672,7 @@ with _caption_col:
     st.markdown(
         "Pack $N$ rectangles into a strip of fixed width $W$ to minimize "
         "the strip length $L$. Edit the rectangle list directly on the "
-        "Optimizer tab, pick a GDP transformation (Big-M, Multiple Big-M, "
-        "Hull) below, "
+        "Optimizer tab, pick a GDP transformation (Big-M, Hull) below, "
         "and click **Solve**. "
         "Non-overlap is written as **disjunctions** (`pyomo.gdp`) and "
         "reformulated to a MILP for HiGHS or Gurobi under a selectable "

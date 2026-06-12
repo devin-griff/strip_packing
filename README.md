@@ -3,7 +3,7 @@
 A Streamlit app for the classic strip-packing problem as a generalized
 disjunctive program (Pyomo + HiGHS/Gurobi): pack N rectangles into a
 fixed-width strip to minimize the used length. Edit the rectangle list
-inline, pick a GDP transformation (Big-M, Multiple Big-M, Hull) and a MIP
+inline, pick a GDP transformation (Big-M, Hull) and a MIP
 solver (open-source HiGHS or commercial Gurobi); the app reformulates the
 disjunctive non-overlap constraints into a MILP, solves it, and visualizes
 the optimal packing. The in-app **📐 Formulation** tab walks through the
