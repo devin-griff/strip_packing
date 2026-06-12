@@ -82,20 +82,22 @@ _materialize_gurobi_license()
 MAX_RECTS = 15
 
 # Default instance shown on first load and after the "Reset to defaults"
-# button. A random 15-rectangle instance (random.Random(124), w ~ U{1..6},
-# length ~ U{1..7}) chosen for variety: widths 1-5, lengths 1-7, total
-# area 118 (geometric lower bound L >= 11.8), and one identical group —
-# rectangles 6, 12, 14 are all 4x2 — so the identical-rectangle ordering
-# constraints are active out of the box. At N = 15 neither solver proves
-# optimality inside the default 10 s cap, which is the point: the Gap
-# metric has a story to tell on first Solve.
+# button. Fifteen rectangles produced by a random guillotine partition of
+# a 10 x 12 rectangle (search seed 21), so a perfect packing exists:
+# total area 120, optimum L = 12 at 100% efficiency. Several identical
+# groups (including five 4x2 pieces) keep the identical-rectangle
+# ordering constraints active out of the box. Gurobi + Big-M proves
+# optimality in ~15 s on a workstation — within the 60 s cap — while
+# HiGHS at the default 10 s leaves a visible gap, so the solver
+# comparison has a story on first Solve.
 DEFAULT_DATA = {
     "rects": list(range(1, 16)),
-    "w": {1: 3.0, 2: 5.0, 3: 1.0, 4: 2.0, 5: 1.0, 6: 4.0, 7: 3.0, 8: 3.0,
-          9: 1.0, 10: 3.0, 11: 2.0, 12: 4.0, 13: 3.0, 14: 4.0, 15: 1.0},
-    "length": {1: 5.0, 2: 4.0, 3: 5.0, 4: 4.0, 5: 1.0, 6: 2.0, 7: 2.0,
-               8: 1.0, 9: 4.0, 10: 3.0, 11: 2.0, 12: 2.0, 13: 4.0,
-               14: 2.0, 15: 7.0},
+    "w": {1: 6.0, 2: 6.0, 3: 4.0, 4: 4.0, 5: 4.0, 6: 4.0, 7: 4.0,
+          8: 4.0, 9: 4.0, 10: 4.0, 11: 4.0, 12: 4.0, 13: 2.0,
+          14: 1.0, 15: 1.0},
+    "length": {1: 2.0, 2: 1.0, 3: 3.0, 4: 3.0, 5: 3.0, 6: 2.0, 7: 2.0,
+               8: 2.0, 9: 2.0, 10: 2.0, 11: 1.0, 12: 1.0, 13: 3.0,
+               14: 6.0, 15: 6.0},
     "W": 10.0,
 }
 
