@@ -135,7 +135,8 @@ def build_model(data):
 
     # Sums used for variable bounds. The strip length L is bounded above by
     # the sum of all rectangle lengths (worst case: stacking all rectangles
-    # end-to-end along the strip). Each y_i is bounded by the same sum.
+    # end-to-end along the strip). Each x_i (position along the length) is
+    # bounded by the same sum.
     L_max = float(sum(data["length"][i] for i in rects)) if rects else 1.0
     L_max = max(L_max, 1.0)
 
@@ -149,25 +150,28 @@ def build_model(data):
     )
     m.W = pyo.Param(initialize=W)
 
-    # Decision variables. Bounded explicitly so Pyomo's gdp.bigm transformation
-    # can derive sensible Big-M values automatically. x_i sits in [0, W],
-    # y_i in [0, L_max], L itself in [0, L_max].
-    m.x = pyo.Var(m.RECTS, domain=pyo.NonNegativeReals, bounds=(0.0, W))
-    m.y = pyo.Var(m.RECTS, domain=pyo.NonNegativeReals, bounds=(0.0, L_max))
+    # Decision variables (near corner of each rectangle). x runs ALONG the
+    # strip length — the horizontal, minimized direction — bounded by
+    # L_max; y runs ACROSS the fixed width, bounded by W. This matches the
+    # on-screen picture (x horizontal, y vertical) and the Sawaya &
+    # Grossmann notation. Explicit bounds let gdp.bigm derive sensible
+    # Big-M values automatically.
+    m.x = pyo.Var(m.RECTS, domain=pyo.NonNegativeReals, bounds=(0.0, L_max))
+    m.y = pyo.Var(m.RECTS, domain=pyo.NonNegativeReals, bounds=(0.0, W))
     m.L = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, L_max))
 
     # Objective: minimize the strip length L.
     m.total_length = pyo.Objective(expr=m.L, sense=pyo.minimize)
 
-    # Containment: each rectangle must fit inside the strip. Width-direction
-    # fit is enforced by the upper bound on x plus this constraint; length-
-    # direction fit ties each rectangle's far edge to the strip-length L.
+    # Containment: each rectangle fits inside the strip. fit_x ties each
+    # rectangle's far end (along the length) to the strip length L; fit_y
+    # keeps it within the fixed width W.
     def fit_x_def(m, i):
-        return m.x[i] + m.w[i] <= m.W
+        return m.x[i] + m.length[i] <= m.L
     m.fit_x = pyo.Constraint(m.RECTS, rule=fit_x_def)
 
     def fit_y_def(m, i):
-        return m.y[i] + m.length[i] <= m.L
+        return m.y[i] + m.w[i] <= m.W
     m.fit_y = pyo.Constraint(m.RECTS, rule=fit_y_def)
 
     # Symmetry breaking (Sawaya & Grossmann): pin the largest rectangle's
@@ -183,14 +187,14 @@ def build_model(data):
     # transformations.
     if rects:
         ref = max(rects, key=lambda i: float(data["w"][i]) * float(data["length"][i]))
-        m.sym_x = pyo.Constraint(expr=m.x[ref] + m.w[ref] / 2.0 <= m.W / 2.0)
-        m.sym_y = pyo.Constraint(expr=m.y[ref] + m.length[ref] / 2.0 <= m.L / 2.0)
+        m.sym_x = pyo.Constraint(expr=m.x[ref] + m.length[ref] / 2.0 <= m.L / 2.0)
+        m.sym_y = pyo.Constraint(expr=m.y[ref] + m.w[ref] / 2.0 <= m.W / 2.0)
 
         # Permutation symmetry: rectangles with identical (w, length) are
-        # interchangeable, so order each identical group by y to keep one
-        # representative per permutation. The reference rectangle's group
-        # is exempt — ordering it could fight the quadrant pin above and
-        # jointly cut off every optimum.
+        # interchangeable, so order each identical group along the length
+        # (x) to keep one representative per permutation. The reference
+        # rectangle's group is exempt — ordering it could fight the
+        # quadrant pin above and jointly cut off every optimum.
         groups = {}
         for i in rects:
             key = (float(data["w"][i]), float(data["length"][i]))
@@ -200,36 +204,36 @@ def build_model(data):
             if len(members) < 2 or ref in members:
                 continue
             for a, b in zip(members, members[1:]):
-                m.lex.add(m.y[a] <= m.y[b])
+                m.lex.add(m.x[a] <= m.x[b])
 
     # Non-overlap disjunctions: for every unordered pair (i, j) with i < j,
     # at least one of the four geometric separations must hold. `Disjunction`
     # accepts a list of disjuncts, each being a list of constraint expressions.
     #
-    # The left/right disjuncts carry two extra inequalities — the S2
+    # The above/below disjuncts carry two extra inequalities — the S2
     # degeneracy-breaking form of Trespalacios & Grossmann. In the classic
     # four-disjunct model the regions OVERLAP: a pair separated both
-    # across the strip and along it can be encoded by two different
-    # disjunct selections, and branch-and-bound explores both encodings of
-    # the same packing. Requiring the left/right disjuncts to also overlap
-    # lengthwise by >= 1 routes every diagonal/flush arrangement uniquely
-    # through below/above. The "+1" (rather than >= 0) closes the
-    # edge-flush tie and is valid because all dimensions are integer —
-    # the editor enforces integer inputs.
+    # across the width and along the length can be encoded by two
+    # different disjunct selections, and branch-and-bound explores both
+    # encodings of the same packing. Requiring the above/below disjuncts
+    # to also overlap lengthwise by >= 1 routes every diagonal/flush
+    # arrangement uniquely through left/right. The "+1" (rather than
+    # >= 0) closes the edge-flush tie and is valid because all dimensions
+    # are integer — the editor enforces integer inputs.
     pairs = [(i, j) for idx_i, i in enumerate(rects) for j in rects[idx_i + 1:]]
     if pairs:
         m.PAIRS = pyo.Set(initialize=pairs, dimen=2)
 
         def disj_rule(m, i, j):
             return [
-                [m.x[i] + m.w[i] <= m.x[j],             # i left of j ...
-                 m.y[i] + m.length[i] >= m.y[j] + 1,    # ... and lengthwise
-                 m.y[j] + m.length[j] >= m.y[i] + 1],   #     overlap >= 1
-                [m.x[j] + m.w[j] <= m.x[i],             # i right of j ...
-                 m.y[i] + m.length[i] >= m.y[j] + 1,
-                 m.y[j] + m.length[j] >= m.y[i] + 1],
-                [m.y[i] + m.length[i] <= m.y[j]],       # i is below j
-                [m.y[j] + m.length[j] <= m.y[i]],       # i is above j
+                [m.x[i] + m.length[i] <= m.x[j]],       # i left of j
+                [m.x[j] + m.length[j] <= m.x[i]],       # i right of j
+                [m.y[i] + m.w[i] <= m.y[j],             # i below j ...
+                 m.x[i] + m.length[i] >= m.x[j] + 1,    # ... and lengthwise
+                 m.x[j] + m.length[j] >= m.x[i] + 1],   #     overlap >= 1
+                [m.y[j] + m.w[j] <= m.y[i],             # i above j ...
+                 m.x[i] + m.length[i] >= m.x[j] + 1,
+                 m.x[j] + m.length[j] >= m.x[i] + 1],
             ]
         m.no_overlap = Disjunction(m.PAIRS, rule=disj_rule)
 
@@ -658,14 +662,14 @@ def lower_bound_L(data):
 
 
 def naive_layout(data):
-    """Cascade layout — all rectangles at x=0, stacked end-to-end along
-    the L direction. This is the worst-case feasible packing and serves
-    as a no-solver default visualization."""
+    """Cascade layout — all rectangles at y=0 (against one width edge),
+    stacked end-to-end along the length (x). This is the worst-case
+    feasible packing and serves as a no-solver default visualization."""
     layout = {"x": {}, "y": {}}
     cumulative = 0.0
     for i in data["rects"]:
-        layout["x"][i] = 0.0
-        layout["y"][i] = cumulative
+        layout["y"][i] = 0.0
+        layout["x"][i] = cumulative
         cumulative += float(data["length"][i])
     return layout
 
@@ -743,12 +747,12 @@ def _render_optimizer_strip(data, layout, L, x_top):
         y = float(layout["y"][i])
         w = float(data["w"][i])
         length = float(data["length"][i])
-        # 90° CW mapping: container x = orig y (along L), container y =
-        # orig x (along W). Positions and sizes are expressed as
-        # percentages of x_top (horizontal) and W (vertical) so the
-        # container can resize freely.
-        left_pct = (y / x_top) * 100.0
-        top_pct = (x / W) * 100.0
+        # Direct mapping: container-horizontal = x (along the length L),
+        # container-vertical = y (across the width W). Positions and sizes
+        # are percentages of x_top (horizontal) and W (vertical) so the
+        # container resizes freely.
+        left_pct = (x / x_top) * 100.0
+        top_pct = (y / W) * 100.0
         width_pct = (length / x_top) * 100.0
         height_pct = (w / W) * 100.0
         color = _PALETTE[(int(i) - 1) % len(_PALETTE)]
@@ -1263,7 +1267,9 @@ def render_formulation_tab():
             )
             st.markdown(
                 "**Variables**  \n"
-                r"$x_i, y_i \ge 0$ near corner of rectangle $i$" "  \n"
+                r"$x_i \ge 0$ near corner of rectangle $i$ along the length"
+                "  \n"
+                r"$y_i \ge 0$ near corner across the width" "  \n"
                 r"$L \ge 0$ strip length (objective)"
             )
         with right:
@@ -1276,8 +1282,8 @@ def render_formulation_tab():
 $$
 \begin{gathered}
 \min_{x, y, L} \; L \\
-\text{s.t.} \quad x_i + w_i \le W \quad \forall i \in \mathcal{I} \\
-y_i + \ell_i \le L \quad \forall i \in \mathcal{I} \\
+\text{s.t.} \quad x_i + \ell_i \le L \quad \forall i \in \mathcal{I} \\
+y_i + w_i \le W \quad \forall i \in \mathcal{I} \\
 x_i, y_i, L \ge 0
 \end{gathered}
 $$
@@ -1296,33 +1302,33 @@ $$
         )
         st.latex(
             r"""
-            \begin{bmatrix} x_i + w_i \le x_j \\
-                            y_i + \ell_i \ge y_j + 1 \\
-                            y_j + \ell_j \ge y_i + 1 \end{bmatrix}
+            \begin{bmatrix} x_i + \ell_i \le x_j \end{bmatrix}
             \;\vee\;
-            \begin{bmatrix} x_j + w_j \le x_i \\
-                            y_i + \ell_i \ge y_j + 1 \\
-                            y_j + \ell_j \ge y_i + 1 \end{bmatrix}
+            \begin{bmatrix} x_j + \ell_j \le x_i \end{bmatrix}
             \;\vee\;
-            \begin{bmatrix} y_i + \ell_i \le y_j \end{bmatrix}
+            \begin{bmatrix} y_i + w_i \le y_j \\
+                            x_i + \ell_i \ge x_j + 1 \\
+                            x_j + \ell_j \ge x_i + 1 \end{bmatrix}
             \;\vee\;
-            \begin{bmatrix} y_j + \ell_j \le y_i \end{bmatrix}
+            \begin{bmatrix} y_j + w_j \le y_i \\
+                            x_i + \ell_i \ge x_j + 1 \\
+                            x_j + \ell_j \ge x_i + 1 \end{bmatrix}
             \quad \forall i < j
             """
         )
         st.markdown(
-            "The two extra inequalities in the left/right disjuncts are "
+            "The two extra inequalities in the above/below disjuncts are "
             "the degeneracy-breaking refinement of Trespalacios & "
             "Grossmann [5]. In the plain four-disjunct model the regions "
-            "*overlap*: a pair separated both across the strip and along "
-            "it satisfies two different disjuncts, so the same physical "
-            "packing has multiple Boolean encodings and branch-and-bound "
-            "explores each one. Requiring the left/right disjuncts to "
-            "also overlap *lengthwise* routes every such arrangement "
-            "uniquely through below/above; the $+1$ (rather than $\\ge "
-            "0$) closes the edge-flush tie as well, and is valid because "
-            "all dimensions here are integer — the editor only accepts "
-            "integer values."
+            "*overlap*: a pair separated both across the width and along "
+            "the length satisfies two different disjuncts, so the same "
+            "physical packing has multiple Boolean encodings and "
+            "branch-and-bound explores each one. Requiring the "
+            "above/below disjuncts to also overlap *lengthwise* routes "
+            "every such arrangement uniquely through left/right; the $+1$ "
+            "(rather than $\\ge 0$) closes the edge-flush tie as well, "
+            "and is valid because all dimensions here are integer — the "
+            "editor only accepts integer values."
         )
 
         st.markdown("**Symmetry breaking**")
@@ -1346,17 +1352,17 @@ $$
             "strip-packing literature:"
         )
         st.latex(
-            r"x_r + \tfrac{w_r}{2} \le \tfrac{W}{2}, "
-            r"\qquad y_r + \tfrac{\ell_r}{2} \le \tfrac{L}{2}"
+            r"x_r + \tfrac{\ell_r}{2} \le \tfrac{L}{2}, "
+            r"\qquad y_r + \tfrac{w_r}{2} \le \tfrac{W}{2}"
         )
         st.markdown(
             "Rectangles with identical dimensions are also "
             "interchangeable — swapping two identical pieces gives a "
             '"different" solution with the same $L$ — so the members of '
-            "each identical group are ordered along the strip:"
+            "each identical group are ordered along the length:"
         )
         st.latex(
-            r"y_i \le y_j \quad \text{for consecutive } i < j"
+            r"x_i \le x_j \quad \text{for consecutive } i < j"
             r"\ \text{ within each group of identical rectangles}"
         )
         st.markdown(
@@ -1501,23 +1507,23 @@ $$
             )
             st.latex(
                 r"\begin{array}{rl}"
-                rf"& \underbrace{{x_{i_} + {wi:g} \le x_{j_} \;\wedge\; "
-                rf"y_{i_} + {li:g} \ge y_{j_} + 1 \;\wedge\; "
-                rf"y_{j_} + {lj:g} \ge y_{i_} + 1}}"
-                rf"_{{{i_}\text{{ left of }}{j_}\text{{, lengthwise overlap}}}} \\"
-                rf"\vee & \underbrace{{x_{j_} + {wj:g} \le x_{i_} \;\wedge\; "
-                rf"y_{i_} + {li:g} \ge y_{j_} + 1 \;\wedge\; "
-                rf"y_{j_} + {lj:g} \ge y_{i_} + 1}}"
-                rf"_{{{j_}\text{{ left of }}{i_}\text{{, lengthwise overlap}}}} \\"
-                rf"\vee & \underbrace{{y_{i_} + {li:g} \le y_{j_}}}_{{{i_}\text{{ below }}{j_}}} \\"
-                rf"\vee & \underbrace{{y_{j_} + {lj:g} \le y_{i_}}}_{{{j_}\text{{ below }}{i_}}}"
+                rf"& \underbrace{{x_{i_} + {li:g} \le x_{j_}}}_{{{i_}\text{{ left of }}{j_}}} \\"
+                rf"\vee & \underbrace{{x_{j_} + {lj:g} \le x_{i_}}}_{{{j_}\text{{ left of }}{i_}}} \\"
+                rf"\vee & \underbrace{{y_{i_} + {wi:g} \le y_{j_} \;\wedge\; "
+                rf"x_{i_} + {li:g} \ge x_{j_} + 1 \;\wedge\; "
+                rf"x_{j_} + {lj:g} \ge x_{i_} + 1}}"
+                rf"_{{{i_}\text{{ below }}{j_}\text{{, lengthwise overlap}}}} \\"
+                rf"\vee & \underbrace{{y_{j_} + {wj:g} \le y_{i_} \;\wedge\; "
+                rf"x_{i_} + {li:g} \ge x_{j_} + 1 \;\wedge\; "
+                rf"x_{j_} + {lj:g} \ge x_{i_} + 1}}"
+                rf"_{{{j_}\text{{ below }}{i_}\text{{, lengthwise overlap}}}}"
                 r"\end{array}"
             )
             st.caption(
                 f"This is one of the {n_disj} pairwise disjunctions in "
                 "the model; the GDP transformation rewrites each one "
                 "into standard MILP constraints (Big-M / Hull). The "
-                "lengthwise-overlap inequalities in the first two terms "
+                "lengthwise-overlap inequalities in the last two terms "
                 "are the degeneracy-breaking refinement — without them, "
                 "a diagonally-separated pair satisfies two terms at "
                 "once, and the solver explores the same packing under "
@@ -1544,8 +1550,8 @@ $$
             "quadrant:"
         )
         st.latex(
-            rf"x_{{{r_}}} + {wr / 2.0:g} \le {W_val / 2.0:g}, "
-            rf"\qquad y_{{{r_}}} + {lr / 2.0:g} \le \tfrac{{L}}{{2}}"
+            rf"x_{{{r_}}} + {lr / 2.0:g} \le \tfrac{{L}}{{2}}, "
+            rf"\qquad y_{{{r_}}} + {wr / 2.0:g} \le {W_val / 2.0:g}"
         )
         st.caption(
             "Each inequality discards one mirror image of every packing "
@@ -1577,10 +1583,10 @@ $$
                 st.markdown(
                     rf"Rectangles {ids} all measure "
                     rf"${w_:g} \times {l_:g}$, so they are ordered along "
-                    "the strip:"
+                    "the length:"
                 )
                 st.latex(
-                    r" \le ".join(rf"y_{{{int(a)}}}" for a in members)
+                    r" \le ".join(rf"x_{{{int(a)}}}" for a in members)
                 )
         for (w_, l_), members in sorted(exempt.items()):
             ids = ", ".join(str(int(a)) for a in members)
