@@ -740,7 +740,7 @@ def _render_top_metric(slot, label, value, suffix_html=""):
     )
 
 
-def _render_optimizer_strip(data, layout, L, x_top):
+def _render_optimizer_strip(data, layout, L, x_top, solved):
     """Render the optimizer's layout as absolutely-positioned HTML divs
     inside a responsive container. The container's width fills its parent
     column (100%) and its aspect ratio is locked to x_top:W via the
@@ -794,10 +794,19 @@ def _render_optimizer_strip(data, layout, L, x_top):
         f'border:2px dashed #dc2626;box-sizing:border-box;'
         f'pointer-events:none;"></div>'
     )
+    # "Not Solved" badge (bottom-centre) while the strip is in its
+    # initialized, unsolved state — mirrors the badge on the other apps.
+    badge_div = "" if solved else (
+        '<div style="position:absolute;left:50%;bottom:8px;'
+        'transform:translateX(-50%);background:rgba(255,255,255,0.85);'
+        'border:1px solid #9ca3af;border-radius:6px;padding:3px 10px;'
+        'color:#b91c1c;font-weight:700;font-size:14px;'
+        'pointer-events:none;white-space:nowrap;">Not Solved</div>'
+    )
     container = (
         f'<div style="position:relative;width:100%;'
         f'aspect-ratio:{x_top} / {W};background:#f4f6fa;">'
-        f'{outline_div}{"".join(rect_divs)}</div>'
+        f'{outline_div}{"".join(rect_divs)}{badge_div}</div>'
     )
     st.markdown(container, unsafe_allow_html=True)
 
@@ -1002,6 +1011,9 @@ def render_optimizer_tab():
         eff_slot = top_row[7].empty()
         gap_slot = top_row[8].empty()
         time_slot = top_row[9].empty()
+        # Spacer so the strip sits a little below the controls/metrics row
+        # (matches the facility-layout spacing).
+        st.markdown("<div style='height:1.5rem'></div>", unsafe_allow_html=True)
         strip_slot = st.empty()
         # Dedicated slot for the "Solving..." spinner so it can appear
         # just below the strip without replacing the strip itself.
@@ -1095,7 +1107,8 @@ def render_optimizer_tab():
     display_L = opt_L if has_incumbent else L_max
 
     with strip_slot.container():
-        _render_optimizer_strip(data, display_layout, display_L, x_top)
+        _render_optimizer_strip(data, display_layout, display_L, x_top,
+                                has_incumbent)
         # Solver-status messages (only on terminal-failure outcomes).
         # We DON'T render a status caption for "time_limit" — the Gap
         # metric tells that story without nagging under the strip.
