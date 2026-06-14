@@ -37,6 +37,7 @@ import copy
 import io
 import math
 import os
+import random
 import time
 from pathlib import Path
 
@@ -588,6 +589,8 @@ def init_state():
         st.session_state.data = copy.deepcopy(DEFAULT_DATA)
     if "optimal" not in st.session_state:
         st.session_state.optimal = None
+    if "seed" not in st.session_state:
+        st.session_state.seed = 0
     # The reset button can't directly mutate widget-backed keys without
     # raising a Streamlit error, so it sets a flag and reruns. We then
     # apply the reset *before* widgets are instantiated this run.
@@ -633,6 +636,20 @@ def remove_rect(data, rid):
     data["rects"] = [i for i in data["rects"] if i != rid]
     data["w"] = {i: v for i, v in data["w"].items() if i != rid}
     data["length"] = {i: v for i, v in data["length"].items() if i != rid}
+    return data
+
+
+def randomize_rects(data, seed):
+    """Re-roll width and length for every existing rectangle, preserving the
+    rectangle count and the strip width W. Dimensions are integers (the S2
+    degeneracy disjuncts in build_model require integrality); widths are capped
+    at W so every piece fits across the strip, lengths span [1, 6] like the
+    default. Mutates `data` and returns it. Unlike the curated default this is
+    an arbitrary instance — no perfect packing is guaranteed."""
+    rng = random.Random(seed)
+    W = max(1, int(float(data["W"])))
+    data["w"] = {rid: float(rng.randint(1, W)) for rid in data["rects"]}
+    data["length"] = {rid: float(rng.randint(1, 6)) for rid in data["rects"]}
     return data
 
 
@@ -870,6 +887,16 @@ def render_optimizer_tab():
             white-space: normal;
             z-index: 1000;
             pointer-events: none;
+        }
+        /* The 2.7/12 editor column is narrow; keep the Add / Reset /
+           Randomize labels on a single line by tightening their side
+           padding and disabling the wrap that split "🎲 Randomize" in two. */
+        .st-key-rects_add button,
+        .st-key-rects_reset button,
+        .st-key-rects_random button {
+            padding-left: 0.25rem !important;
+            padding-right: 0.25rem !important;
+            white-space: nowrap !important;
         }
         </style>
         """,
@@ -1219,30 +1246,44 @@ def _render_rect_editor(data):
         st.rerun()
 
     can_add = len(data["rects"]) < MAX_RECTS
-    # Buttons share the editor's column structure so Add rectangle aligns
-    # with the Width column and Reset to defaults aligns with Length.
-    btn_cols = st.columns(_editor_cols)
-    with btn_cols[1]:
+    # Add / Reset / Randomize in one even row — the shared three-button
+    # pattern across the apps. Randomize re-rolls every rectangle's size.
+    btn_cols = st.columns(3)
+    with btn_cols[0]:
         if st.button(
-            "➕ Add rectangle",
+            "➕ Add",
             key="rects_add",
             disabled=not can_add,
-            help=(
-                None
-                if can_add
-                else f"Max {MAX_RECTS} rectangles."
-            ),
+            use_container_width=True,
+            help=None if can_add else f"Max {MAX_RECTS} rectangles.",
         ):
             st.session_state.data = add_rect(dict(data))
             st.session_state.optimal = None
             st.rerun()
-    with btn_cols[2]:
+    with btn_cols[1]:
         if st.button(
-            "Reset to defaults",
+            "↺ Reset",
             key="rects_reset",
+            use_container_width=True,
             help="Restore the default instance.",
         ):
             st.session_state["_pending_reset"] = True
+            st.rerun()
+    with btn_cols[2]:
+        if st.button(
+            "🎲 Randomize",
+            key="rects_random",
+            use_container_width=True,
+            help="Re-roll every rectangle's width and length.",
+        ):
+            st.session_state.seed = int(st.session_state.get("seed", 0)) + 1
+            st.session_state.data = randomize_rects(
+                dict(data), st.session_state.seed
+            )
+            st.session_state.optimal = None
+            st.session_state["_rect_editor_ver"] = (
+                st.session_state.get("_rect_editor_ver", 0) + 1
+            )
             st.rerun()
 
 
