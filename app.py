@@ -78,9 +78,10 @@ def _materialize_gurobi_license():
 _materialize_gurobi_license()
 
 
-# Hard cap on rectangle count. Big-M MILP gets slow beyond ~15 rectangles
-# because the number of disjunctions grows as N(N-1)/2.
-MAX_RECTS = 15
+# Hard cap on rectangle count. The Big-M MILP's disjunctions grow as N(N-1)/2,
+# so proving optimality slows past ~15 — but the solver still returns a good
+# feasible packing quickly well beyond that, which is why the cap sits at 25.
+MAX_RECTS = 25
 
 # Default instance shown on first load and after the "Reset to defaults"
 # button. Fifteen rectangles produced by a random guillotine partition of
