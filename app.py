@@ -706,12 +706,10 @@ _PALETTE = [
 ]
 
 
-def _render_top_metric(slot, label, value, suffix_html=""):
+def _render_top_metric(slot, label, value):
     """Render a metric-shaped block via raw HTML. Mirrors the
     `colored_metric` helper in the diet app: a small gray label on
-    top, large value below, with an optional HTML suffix appended
-    inside the value div (used to drop a red ⚠ glyph next to "Best
-    length" when the solver didn't prove optimality).
+    top, large value below.
 
     All five top-row metrics use this helper so they're styled
     identically; mixing st.metric with custom HTML produced visible
@@ -733,7 +731,7 @@ def _render_top_metric(slot, label, value, suffix_html=""):
         "</div>"
         "<div style='font-size:1.8rem; font-weight:400; line-height:1.1; "
         "white-space:nowrap;'>"
-        f"{value}{suffix_html}"
+        f"{value}"
         "</div>"
         "</div>",
         unsafe_allow_html=True,
@@ -862,41 +860,6 @@ def render_optimizer_tab():
             pointer-events: none;
             user-select: none;
             caret-color: transparent;
-        }
-        /* Red ⚠ glyph next to "Best length" when the solver didn't
-           prove optimality within the time cap. Hovering the glyph
-           reveals a black tooltip bubble with the time-cap
-           explanation. Same pattern diet / knapsack use for their
-           constraint-violation marks. */
-        .strip-violation-icon {
-            position: relative;
-            display: inline-block;
-        }
-        .strip-violation-icon:hover::after {
-            content: attr(data-violation-tooltip);
-            position: absolute;
-            top: 100%;
-            left: 0;
-            margin-top: 0.25rem;
-            background: #000;
-            color: #fff;
-            padding: 0.5rem 0.75rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-family: inherit;
-            font-weight: 400;
-            line-height: 1.4;
-            /* `width: max-content` makes the bubble expand to its
-               natural content width (no wrapping); `max-width: 24rem`
-               then caps it so very long messages still wrap. Without
-               max-content the absolute-positioned ::after would
-               shrink-to-fit aggressively and wrap after every word or
-               two, which is what showed up in the field. */
-            width: max-content;
-            max-width: 24rem;
-            white-space: normal;
-            z-index: 1000;
-            pointer-events: none;
         }
         /* The 2.7/12 editor column is narrow; keep the Add / Reset /
            Randomize labels on a single line by tightening their side
@@ -1142,31 +1105,16 @@ def render_optimizer_tab():
     elapsed = optimal.get("elapsed") if optimal else None
 
     # All 5 metrics in the top row are rendered via the same custom
-    # HTML helper so they're visually consistent with each other AND
-    # so the "Best length" case can drop a red ⚠ glyph in cleanly as
-    # `suffix_html`. This is the same pattern the diet / knapsack apps
-    # use; mixing st.metric with custom HTML for one slot is what
-    # caused the earlier alignment / styling issues.
+    # HTML helper so they're visually consistent. Mixing st.metric with
+    # custom HTML for one slot is what caused the earlier alignment /
+    # styling issues.
     _render_top_metric(ub_slot, "Upper bound", f"{L_max:.0f}")
     if proved_optimal:
         _render_top_metric(opt_slot, "Optimal length", f"{opt_L:.0f}")
     elif has_incumbent:
-        _cap = optimal.get("time_limit_s", SOLVE_TIME_LIMIT_S)
-        tooltip = (
-            f"Solver hit the {_cap:g} s time cap before "
-            "proving optimality. This is the best feasible packing "
-            "found so far; see Gap for how far it could still tighten."
-        )
-        violation_icon = (
-            '<span class="strip-violation-icon" '
-            f'data-violation-tooltip="{tooltip}" '
-            'style="color:#dc2626; cursor:default; font-weight:700; '
-            'margin-left:0.4em; vertical-align:baseline;">⚠</span>'
-        )
-        _render_top_metric(
-            opt_slot, "Best length", f"{opt_L:.0f}",
-            suffix_html=violation_icon,
-        )
+        # Best feasible packing found before the time cap (not proven
+        # optimal); the Gap metric shows how far it could still tighten.
+        _render_top_metric(opt_slot, "Best length", f"{opt_L:.0f}")
     else:
         _render_top_metric(opt_slot, "Optimal length", "—")
     _render_top_metric(
