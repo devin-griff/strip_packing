@@ -698,11 +698,18 @@ def naive_layout(data):
 # editor on the left, strip + controls + metrics on the right); Formulation
 # shows the math; Logs shows HiGHS output.
 
-# A 12-color categorical palette repeated as needed. Tableau-style; reads
-# well at small rectangle sizes and keeps adjacent indices distinguishable.
+# Categorical palette — one distinct color per rectangle up to MAX_RECTS, so no
+# two blocks ever share a color (length >= MAX_RECTS, so the index lookup never
+# wraps/repeats). The first 12 are the Tableau base; the remaining 13 were
+# chosen for maximum perceptual (CIELAB) distance from those and each other,
+# kept dark enough for the white block labels. 25 dark-enough colors is near the
+# limit of distinguishability, so the densest few read as similar — but none are
+# identical.
 _PALETTE = [
     "#4C78A8", "#F58518", "#54A24B", "#E45756", "#72B7B2", "#EECA3B",
     "#B279A2", "#FF9DA6", "#9D755D", "#BAB0AC", "#1F77B4", "#9467BD",
+    "#2929D6", "#D629D6", "#D62988", "#98943E", "#223FB4", "#39C639",
+    "#983E50", "#B45D22", "#A630A0", "#944BDD", "#22B488", "#4B77DD", "#29ABD6",
 ]
 
 
@@ -777,7 +784,6 @@ def _render_optimizer_strip(data, layout, L, x_top, solved):
             f'left:{left_pct:.4f}%;top:{top_pct:.4f}%;'
             f'width:{width_pct:.4f}%;height:{height_pct:.4f}%;'
             f'background:{color};'
-            f'border:2px solid #ffffff;box-sizing:border-box;'
             f'color:#ffffff;font-weight:700;font-size:14px;'
             f'display:flex;align-items:center;justify-content:center;">'
             f"{int(i)}</div>"
@@ -957,7 +963,7 @@ def render_optimizer_tab():
             solver_label = st.radio(
                 "MIP solver",
                 options=list(_MIP_SOLVERS.keys()),
-                index=0,
+                index=1,  # default to Gurobi
                 horizontal=True,
                 key="solver_radio",
             )
