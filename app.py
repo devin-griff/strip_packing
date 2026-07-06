@@ -981,7 +981,7 @@ def render_optimizer_tab():
         gap_slot = top_row[8].empty()
         time_slot = top_row[9].empty()
         # Spacer so the strip sits a little below the controls/metrics row
-        # (matches the facility-layout spacing).
+        #.
         st.markdown("<div style='height:1.5rem'></div>", unsafe_allow_html=True)
         strip_slot = st.empty()
         # Dedicated slot for the "Solving..." spinner so it can appear
