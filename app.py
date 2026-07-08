@@ -1,5 +1,5 @@
 # =============================================================================
-# Strip Packing GDP Optimizer — a Streamlit tutorial app.
+# Strip Packing GDP Optimizer: a Streamlit tutorial app.
 #
 # This file builds an interactive web app around the classic strip-packing
 # problem: given N rectangles with widths w_i and lengths ℓ_i, place them
@@ -7,7 +7,7 @@
 # strip's used length L is minimized. The visualization rotates the strip
 # 90° clockwise so W is vertical (fixed) and L grows to the right.
 #
-# It is a Generalized Disjunctive Program (GDP) — for each pair of rectangles
+# It is a Generalized Disjunctive Program (GDP): for each pair of rectangles
 # (i, j), at least one of four geometric relationships must hold:
 #     i is left of j, i is right of j, i is below j, or i is above j.
 # Pyomo's `gdp` module expresses these `Disjunction` blocks natively. A
@@ -15,20 +15,20 @@
 # standard MILP that HiGHS can solve.
 #
 # Library roadmap:
-#   - streamlit  — the UI framework. Each interaction reruns this script
+#   - streamlit : the UI framework. Each interaction reruns this script
 #                  top-to-bottom; persistent values live in `st.session_state`.
-#   - pyomo      — algebraic modeling: sets, params, vars, objective,
+#   - pyomo     : algebraic modeling: sets, params, vars, objective,
 #                  constraints. The `pyomo.gdp` submodule adds Disjunction.
-#   - HiGHS      — the MILP solver, called via Pyomo's appsi_highs interface.
+#   - HiGHS     : the MILP solver, called via Pyomo's appsi_highs interface.
 #                  Ships as a pip wheel (`highspy`).
 #
 # File roadmap:
-#   1. Solver       — model definition, GDP transformation, HiGHS log capture.
-#   2. State        — session_state init / reset.
-#   3. Utilities    — rectangle add/delete + geometry helpers.
-#   4. LaTeX        — render the general formulation and instance summary.
-#   5. Tabs         — render_optimizer / render_formulation / render_logs.
-#   6. Main         — page config, corner-logo CSS, header/caption, 3 tabs.
+#   1. Solver      : model definition, GDP transformation, HiGHS log capture.
+#   2. State       : session_state init / reset.
+#   3. Utilities   : rectangle add/delete + geometry helpers.
+#   4. LaTeX       : render the general formulation and instance summary.
+#   5. Tabs        : render_optimizer / render_formulation / render_logs.
+#   6. Main        : page config, corner-logo CSS, header/caption, 3 tabs.
 # =============================================================================
 
 import base64
@@ -50,12 +50,12 @@ from pyomo.opt import TerminationCondition
 
 def _materialize_gurobi_license():
     """Production license shim. Fly secrets surface as environment
-    variables, but gurobipy wants a license FILE — so if the three WLS
+    variables, but gurobipy wants a license FILE: so if the three WLS
     values are present and no license file is configured, write one to
     the home directory and point GRB_LICENSE_FILE at it. Local dev is
     untouched: there GRB_LICENSE_FILE already points at a file on disk
     (or gurobipy finds one in its default locations), and the values
-    never appear in the repo or the image — only in Fly's secret store
+    never appear in the repo or the image: only in Fly's secret store
     and the container's private filesystem."""
     if os.environ.get("GRB_LICENSE_FILE"):
         return
@@ -79,7 +79,7 @@ _materialize_gurobi_license()
 
 
 # Hard cap on rectangle count. The Big-M MILP's disjunctions grow as N(N-1)/2,
-# so proving optimality slows past ~15 — but the solver still returns a good
+# so proving optimality slows past ~15: but the solver still returns a good
 # feasible packing quickly well beyond that, which is why the cap sits at 25.
 MAX_RECTS = 25
 
@@ -89,8 +89,8 @@ MAX_RECTS = 25
 # total area 120, optimum L = 12 at 100% efficiency. Several identical
 # groups (including five 4x2 pieces) keep the identical-rectangle
 # ordering constraints active out of the box. Gurobi + Big-M proves
-# optimality in ~15 s on a workstation — comfortably inside the 60 s
-# cap — while HiGHS at the default 10 s leaves a visible gap, so the
+# optimality in ~15 s on a workstation: comfortably inside the 60 s
+# cap: while HiGHS at the default 10 s leaves a visible gap, so the
 # solver comparison has a story on first Solve.
 DEFAULT_DATA = {
     "rects": list(range(1, 16)),
@@ -104,7 +104,7 @@ DEFAULT_DATA = {
 }
 
 # GDP → MILP transformations offered via the radio above the strip on
-# the Optimizer tab — the classical Big-M / Hull pair, both
+# the Optimizer tab: the classical Big-M / Hull pair, both
 # TransformationFactory entries in pyomo.gdp.
 _GDP_TRANSFORMS = {
     "Big-M": "gdp.bigm",
@@ -115,7 +115,7 @@ _GDP_LABEL = {v: k for k, v in _GDP_TRANSFORMS.items()}
 # MIP solver choices for the Optimizer tab radio. Both consume the same
 # GDP-reformulated MILP under the same selectable time cap; HiGHS is the
 # open-source default (pip wheel, no license), Gurobi the commercial
-# comparison — licensed via Gurobi's Web License Service, with a seat
+# comparison: licensed via Gurobi's Web License Service, with a seat
 # checked out per solve and released immediately after.
 _MIP_SOLVERS = {"HiGHS": "appsi_highs", "Gurobi": "appsi_gurobi"}
 
@@ -153,7 +153,7 @@ def build_model(data):
     m.W = pyo.Param(initialize=W)
 
     # Decision variables (near corner of each rectangle). x runs ALONG the
-    # strip length — the horizontal, minimized direction — bounded by
+    # strip length: the horizontal, minimized direction: bounded by
     # L_max; y runs ACROSS the fixed width, bounded by W. This matches the
     # on-screen picture (x horizontal, y vertical) and the Sawaya &
     # Grossmann notation. Explicit bounds let gdp.bigm derive sensible
@@ -180,7 +180,7 @@ def build_model(data):
     # CENTER into the lower-left quadrant. Every packing either satisfies
     # these or its mirror image does (reflect across the strip's
     # centerline / along its length), so an optimal solution always
-    # survives — but branch-and-bound no longer proves the same bound
+    # survives: but branch-and-bound no longer proves the same bound
     # separately for all four reflections of each layout. The y pin is
     # legal despite L being a variable: the vertical mirror of a feasible
     # packing has the same L, and the constraint stays linear. Largest
@@ -195,7 +195,7 @@ def build_model(data):
         # Permutation symmetry: rectangles with identical (w, length) are
         # interchangeable, so order each identical group along the length
         # (x) to keep one representative per permutation. The reference
-        # rectangle's group is exempt — ordering it could fight the
+        # rectangle's group is exempt: ordering it could fight the
         # quadrant pin above and jointly cut off every optimum.
         groups = {}
         for i in rects:
@@ -212,7 +212,7 @@ def build_model(data):
     # at least one of the four geometric separations must hold. `Disjunction`
     # accepts a list of disjuncts, each being a list of constraint expressions.
     #
-    # The above/below disjuncts carry two extra inequalities — the S2
+    # The above/below disjuncts carry two extra inequalities: the S2
     # degeneracy-breaking form of Trespalacios & Grossmann. In the classic
     # four-disjunct model the regions OVERLAP: a pair separated both
     # across the width and along the length can be encoded by two
@@ -221,7 +221,7 @@ def build_model(data):
     # to also overlap lengthwise by >= 1 routes every diagonal/flush
     # arrangement uniquely through left/right. The "+1" (rather than
     # >= 0) closes the edge-flush tie and is valid because all dimensions
-    # are integer — the editor enforces integer inputs.
+    # are integer: the editor enforces integer inputs.
     pairs = [(i, j) for idx_i, i in enumerate(rects) for j in rects[idx_i + 1:]]
     if pairs:
         m.PAIRS = pyo.Set(initialize=pairs, dimen=2)
@@ -246,7 +246,7 @@ def build_model(data):
 # (especially with Big-M on N close to MAX_RECTS) can take much longer
 # than this in the worst case; cutting off keeps the UI responsive and
 # surfaces the optimality gap when the solver doesn't converge. The user
-# can raise the cap via the Time limit select on the Optimizer tab —
+# can raise the cap via the Time limit select on the Optimizer tab -
 # bounded at 60 s so a public visitor can't pin the page (or a Gurobi
 # WLS seat) for minutes.
 SOLVE_TIME_LIMIT_S = 10.0
@@ -259,7 +259,7 @@ GAP_OPTIMAL_THRESHOLD_PCT = 0.05
 
 
 class _LicenseBusyError(RuntimeError):
-    """Raised when Gurobi's WLS checkout fails even after a retry —
+    """Raised when Gurobi's WLS checkout fails even after a retry -
     typically because the license's concurrent-session seats are all
     taken. solve() maps this onto the `license_busy` status."""
 
@@ -269,14 +269,14 @@ def _solve_capturing(m, transform, solver_name="appsi_highs",
     """Apply the GDP transformation, run the chosen MIP solver, and
     return (termination_condition, gap_pct, log_text, elapsed) with the
     solution (if any) loaded onto `m`. Captures the solver's stdout via
-    contextlib.redirect_stdout/stderr — same pattern as knapsack /
+    contextlib.redirect_stdout/stderr: same pattern as knapsack /
     diet / circle-packing. `elapsed` is the wall-clock time of
-    transformation + solve, in seconds — shown as a metric on the
+    transformation + solve, in seconds: shown as a metric on the
     Optimizer tab so users can compare reformulations and solvers
     head-to-head.
 
     The two solvers ride different Pyomo interfaces on purpose. HiGHS
-    uses the legacy SolverFactory("appsi_highs") wrapper — proven in
+    uses the legacy SolverFactory("appsi_highs") wrapper: proven in
     production, warts documented in _load_solution_if_present. Gurobi
     uses the NATIVE appsi interface: the legacy wrapper's symbol-map
     bookkeeping crashes on GDP-transformed models when paired with
@@ -298,7 +298,7 @@ def _solve_capturing(m, transform, solver_name="appsi_highs",
         else:
             tc, gap_pct = _run_highs(m, time_limit_s)
     # Scrub license-identifying lines from the captured log before it
-    # reaches the public Logs tab — Gurobi's WLS banner prints the
+    # reaches the public Logs tab: Gurobi's WLS banner prints the
     # license ID and registrant ("WLS license NNNNNNN - registered to
     # ..."). Substring match keeps this robust to wording shifts across
     # Gurobi versions; HiGHS logs never match.
@@ -337,7 +337,7 @@ def _run_gurobi(m, time_limit_s=SOLVE_TIME_LIMIT_S):
     Gurobi checks out a WLS license seat when its environment starts.
     The license allows a small number of concurrent sessions and seats
     churn in seconds, so one checkout collision gets a quiet retry
-    before surfacing as license_busy — and the seat is ALWAYS released
+    before surfacing as license_busy: and the seat is ALWAYS released
     afterward, since holding it would pin license capacity to this
     machine between solves. (The seat is held for the duration of the
     solve, which is why the user-selectable time limit is bounded.)"""
@@ -369,7 +369,7 @@ def _run_gurobi(m, time_limit_s=SOLVE_TIME_LIMIT_S):
             pass
 
     # Map the appsi TerminationCondition onto the legacy enum solve()
-    # branches on — the member names match for everything we handle
+    # branches on: the member names match for everything we handle
     # (optimal, maxTimeLimit, infeasible, infeasibleOrUnbounded,
     # unbounded); anything exotic falls back to `unknown`.
     tc = getattr(
@@ -394,7 +394,7 @@ def _load_solution_if_present(m, results):
     appsi_highs's Results object (works on 6.8.x in local testing,
     appears to no-op on 6.10.x in production).
 
-    Path 1: the legacy `m.solutions.load_from(results)` — works when
+    Path 1: the legacy `m.solutions.load_from(results)`: works when
     Pyomo's solution adapter understands the appsi_highs Results
     format. Path 2: walk `results.solution[0]['Variable']` directly
     and assign values via `m.find_component(name).value = v`. Both are
@@ -427,7 +427,7 @@ def _load_solution_if_present(m, results):
 def _extract_gap_pct(results):
     """Pull the relative optimality gap (in percent) out of a legacy
     Pyomo Results object. Returns `None` if the bounds aren't both
-    available — e.g. if HiGHS hit the time limit without a feasible
+    available: e.g. if HiGHS hit the time limit without a feasible
     incumbent, or for solver backends that don't populate the
     problem-level bound fields. (The values returned by `problem[k]`
     are plain floats despite the docs sometimes describing them as
@@ -504,7 +504,7 @@ def solve(data, transform="gdp.bigm", solver_name="appsi_highs",
     # _solve_capturing alongside the gap) into a small set of stable
     # status strings the UI knows how to render. With a time limit set,
     # the solver may return `maxTimeLimit` carrying a best-known feasible
-    # incumbent — treated as a "feasible" status so the UI still draws
+    # incumbent: treated as a "feasible" status so the UI still draws
     # the packing, with the gap surfaced separately.
 
     def _extract_layout():
@@ -618,7 +618,7 @@ def apply_reset():
 
 # ---------- Utilities ----------
 #
-# Rectangles are tracked by stable opaque integer ids — `rects` is a list
+# Rectangles are tracked by stable opaque integer ids: `rects` is a list
 # of ids, `w` and `length` map id → value. Ids don't renumber on delete:
 # this keeps widget state in the editor below from getting reassigned to a
 # different rectangle whenever one is removed.
@@ -646,7 +646,7 @@ def randomize_rects(data, seed):
     degeneracy disjuncts in build_model require integrality); widths are capped
     at W so every piece fits across the strip, lengths span [1, 6] like the
     default. Mutates `data` and returns it. Unlike the curated default this is
-    an arbitrary instance — no perfect packing is guaranteed."""
+    an arbitrary instance: no perfect packing is guaranteed."""
     rng = random.Random(seed)
     W = max(1, int(float(data["W"])))
     data["w"] = {rid: float(rng.randint(1, W)) for rid in data["rects"]}
@@ -680,7 +680,7 @@ def lower_bound_L(data):
 
 
 def naive_layout(data):
-    """Cascade layout — all rectangles at y=0 (against one width edge),
+    """Cascade layout: all rectangles at y=0 (against one width edge),
     stacked end-to-end along the length (x). This is the worst-case
     feasible packing and serves as a no-solver default visualization."""
     layout = {"x": {}, "y": {}}
@@ -698,12 +698,12 @@ def naive_layout(data):
 # editor on the left, strip + controls + metrics on the right); Formulation
 # shows the math; Logs shows HiGHS output.
 
-# Categorical palette — one distinct color per rectangle up to MAX_RECTS, so no
+# Categorical palette: one distinct color per rectangle up to MAX_RECTS, so no
 # two blocks ever share a color (length >= MAX_RECTS, so the index lookup never
 # wraps/repeats). The first 12 are the Tableau base; the remaining 13 were
 # chosen for maximum perceptual (CIELAB) distance from those and each other,
 # kept dark enough for the white block labels. 25 dark-enough colors is near the
-# limit of distinguishability, so the densest few read as similar — but none are
+# limit of distinguishability, so the densest few read as similar: but none are
 # identical.
 _PALETTE = [
     "#4C78A8", "#F58518", "#54A24B", "#E45756", "#72B7B2", "#EECA3B",
@@ -722,12 +722,12 @@ def _render_top_metric(slot, label, value):
     identically; mixing st.metric with custom HTML produced visible
     alignment / font-size mismatches in earlier attempts. Wrapper
     margin matches diet's colored_metric (top 0.25rem / bottom 1rem)
-    so the value has enough breathing room below — without it, the
+    so the value has enough breathing room below: without it, the
     strip's negative-margin layout crowds up against the value text.
     `white-space: nowrap` on both label and value keeps each metric
     on a single line per row (otherwise "100.0%" or "Efficiency"
     wrap in narrow columns)."""
-    # Value font runs a notch under diet's 2.25rem original — the top
+    # Value font runs a notch under diet's 2.25rem original: the top
     # row hosts three radios plus five metrics, and 1.8rem buys the
     # difference without reading "small".
     slot.markdown(
@@ -799,7 +799,7 @@ def _render_optimizer_strip(data, layout, L, x_top, solved):
         f'pointer-events:none;"></div>'
     )
     # "Not Solved" badge (bottom-centre) while the strip is in its
-    # initialized, unsolved state — mirrors the badge on the other apps.
+    # initialized, unsolved state: mirrors the badge on the other apps.
     badge_div = "" if solved else (
         '<div style="position:absolute;left:50%;bottom:8px;'
         'transform:translateX(-50%);background:rgba(255,255,255,0.85);'
@@ -817,7 +817,7 @@ def _render_optimizer_strip(data, layout, L, x_top, solved):
 
 def render_optimizer_tab():
     # Page-wide CSS for the editor steppers (tight spacing, right-aligned
-    # numbers next to the +/- buttons). Applied globally — the only place
+    # numbers next to the +/- buttons). Applied globally: the only place
     # with many stacked horizontal blocks is the editor; other sections are
     # minimally affected.
     st.markdown(
@@ -828,7 +828,7 @@ def render_optimizer_tab():
             margin-bottom: -0.75rem;
             /* Streamlit's default 1rem column gap is the difference
                between the ten-item control row fitting on one line and
-               the radios wrapping — nine gutters at half a rem buys
+               the radios wrapping: nine gutters at half a rem buys
                ~70px back. */
             gap: 0.5rem !important;
         }
@@ -839,7 +839,7 @@ def render_optimizer_tab():
         }
         /* st.number_input stretches to fill its column, so the W
            column could never show a gap before "MIP solver" no matter
-           the column weights — every other group's gap comes from its
+           the column weights: every other group's gap comes from its
            natural content width. Cap the W input so it behaves like
            the radios and the inter-group spacing evens out. (st-key-*
            classes come from the widget's key.) */
@@ -903,7 +903,7 @@ def render_optimizer_tab():
         st.session_state.pop("W_input", None)
 
     # ── Two-column layout: editor (left) | strip column fills remainder ──
-    # The metric column is gone — metrics now live in a sub-row above the
+    # The metric column is gone: metrics now live in a sub-row above the
     # strip, so the strip itself can stretch to the right edge of the page.
     editor_col, strip_col = st.columns([2.7, 9.3])
 
@@ -916,14 +916,14 @@ def render_optimizer_tab():
     # sits on the far left, then W, then the transformation radio, then
     # the four metric slots. The strip below renders through a placeholder
     # so the controls in the top row can update session_state before we
-    # paint — avoids a stale-render lag.
+    # paint: avoids a stale-render lag.
     with strip_col:
         # Six metric slots after the controls: title room shrinks one
         # column-unit to make room for Gap. Order matches the user's
         # mental flow: bounds → result → quality → optimality → time.
         # Column weights: Solve / W / Transformation / 5 metric slots.
         # W gets 1.6 (vs 1 for the metric slots) so the +/- stepper
-        # buttons have room to sit inline beside the input — at
+        # buttons have room to sit inline beside the input: at
         # weight 1 the column was too narrow and the steppers wrapped
         # to a second line as a thin teal bar.
         # Column order: Solve / W / GDP transformation / MIP solver /
@@ -1023,7 +1023,7 @@ def render_optimizer_tab():
         return
 
     L_max = float(sum(data["length"][i] for i in data["rects"])) or 1.0
-    # A result counts as "renderable" if HiGHS returned an incumbent —
+    # A result counts as "renderable" if HiGHS returned an incumbent -
     # either a proven optimum, or a best-feasible found when the time
     # limit fired. Both populate x / y / L on the result dict.
     has_incumbent = bool(
@@ -1040,7 +1040,7 @@ def render_optimizer_tab():
         else None
     )
     # 100% efficiency means the rectangles fill the strip with zero
-    # waste — that's the theoretical lower bound on L (L >= area / W),
+    # waste: that's the theoretical lower bound on L (L >= area / W),
     # so this incumbent IS provably optimal regardless of what the
     # solver's LP-derived dual bound says. The Big-M LP relaxation can
     # be very loose so the solver may report a large gap even when the
@@ -1066,8 +1066,8 @@ def render_optimizer_tab():
     # Strip visualization tracks the latest packing: naive cascade until
     # the user solves, then the incumbent (proven optimum or
     # best-feasible from a time-limited run). Metric labels use stable
-    # text — "Upper bound" / "Optimal length" or "Best length" /
-    # "Efficiency" / "Gap" / "Solve time" — and show "—" for
+    # text: "Upper bound" / "Optimal length" or "Best length" /
+    # "Efficiency" / "Gap" / "Solve time": and show "-" for
     # solve-dependent values until then.
     display_layout = (
         {"x": optimal["x"], "y": optimal["y"]} if has_incumbent
@@ -1079,7 +1079,7 @@ def render_optimizer_tab():
         _render_optimizer_strip(data, display_layout, display_L, x_top,
                                 has_incumbent)
         # Solver-status messages (only on terminal-failure outcomes).
-        # We DON'T render a status caption for "time_limit" — the Gap
+        # We DON'T render a status caption for "time_limit": the Gap
         # metric tells that story without nagging under the strip.
         if optimal:
             if optimal["status"] == "solver_missing":
@@ -1088,7 +1088,7 @@ def render_optimizer_tab():
                 st.error(optimal.get("message", "Infeasible data"))
             elif optimal["status"] == "infeasible":
                 st.error(
-                    "Infeasible — no packing fits these rectangles in the strip."
+                    "Infeasible: no packing fits these rectangles in the strip."
                 )
             elif optimal["status"] == "unbounded":
                 st.error("Unbounded problem.")
@@ -1103,7 +1103,7 @@ def render_optimizer_tab():
                 st.error(
                     optimal.get(
                         "message",
-                        "Gurobi license busy — try again in a moment.",
+                        "Gurobi license busy: try again in a moment.",
                     )
                 )
             elif optimal["status"] not in ("optimal", "time_limit", "no_rects"):
@@ -1122,13 +1122,13 @@ def render_optimizer_tab():
         # optimal); the Gap metric shows how far it could still tighten.
         _render_top_metric(opt_slot, "Best length", f"{opt_L:.0f}")
     else:
-        _render_top_metric(opt_slot, "Optimal length", "—")
+        _render_top_metric(opt_slot, "Optimal length", "-")
     _render_top_metric(
         eff_slot, "Efficiency",
-        f"{eff_pct:.1f}%" if eff_pct is not None else "—",
+        f"{eff_pct:.1f}%" if eff_pct is not None else "-",
     )
     if gap_pct is None:
-        _render_top_metric(gap_slot, "Gap", "—")
+        _render_top_metric(gap_slot, "Gap", "-")
     elif gap_pct < GAP_OPTIMAL_THRESHOLD_PCT:
         _render_top_metric(gap_slot, "Gap", "0.0%")
     else:
@@ -1139,12 +1139,12 @@ def render_optimizer_tab():
     # Hull) rides on top.
     _render_top_metric(
         time_slot, "Total time",
-        f"{elapsed:.2f} s" if isinstance(elapsed, (int, float)) else "—",
+        f"{elapsed:.2f} s" if isinstance(elapsed, (int, float)) else "-",
     )
 
 
 def _render_rect_editor(data):
-    """The rectangles editor — one row per rectangle with stepper inputs
+    """The rectangles editor: one row per rectangle with stepper inputs
     and a delete button. Used in the left column of the Optimizer tab."""
     st.markdown(f"#### Rectangles (max {MAX_RECTS})")
 
@@ -1164,7 +1164,7 @@ def _render_rect_editor(data):
     # placeholders. Streamlit replaces elements positionally as deltas
     # stream in but only sweeps TRAILING leftovers at end-of-run, so a
     # rerun that shrinks the element count leaves the old last row
-    # visible for the whole round-trip — the ghost-row flash on delete
+    # visible for the whole round-trip: the ghost-row flash on delete
     # that circle-packing exhibited. A constant element count removes
     # the trailing leftover entirely. (Same pattern as circle-packing.)
     n_rects = len(data["rects"])
@@ -1183,7 +1183,7 @@ def _render_rect_editor(data):
             f'font-weight:700;font-size:0.85rem;">{idx}</div>',
             unsafe_allow_html=True,
         )
-        # Integer inputs by construction — the S2 degeneracy-breaking
+        # Integer inputs by construction: the S2 degeneracy-breaking
         # disjuncts in build_model rely on integer dimensions (their +1
         # would wrongly cut fractional-data packings), so the editor
         # guarantees integrality rather than assuming it.
@@ -1214,7 +1214,7 @@ def _render_rect_editor(data):
         st.rerun()
 
     can_add = len(data["rects"]) < MAX_RECTS
-    # Add / Reset / Randomize in one even row — the shared three-button
+    # Add / Reset / Randomize in one even row: the shared three-button
     # pattern across the apps. Randomize re-rolls every rectangle's size.
     btn_cols = st.columns(3)
     with btn_cols[0]:
@@ -1304,7 +1304,7 @@ $$
         st.markdown("**Disjunction (no overlap)**")
         st.markdown(
             "For every pair $(i, j)$ with $i < j$, at least one of four "
-            "geometric separations must hold — rectangle $i$ must lie to "
+            "geometric separations must hold: rectangle $i$ must lie to "
             "the left of, right of, below, or above rectangle $j$. The "
             "four-way disjunction is the GDP strip-packing model of "
             "Sawaya & Grossmann [4]:"
@@ -1336,27 +1336,27 @@ $$
             "above/below disjuncts to also overlap *lengthwise* routes "
             "every such arrangement uniquely through left/right; the $+1$ "
             "(rather than $\\ge 0$) closes the edge-flush tie as well, "
-            "and is valid because all dimensions here are integer — the "
+            "and is valid because all dimensions here are integer: the "
             "editor only accepts integer values."
         )
 
         st.markdown("**Symmetry breaking**")
         st.markdown(
             "The model breaks three distinct symmetry layers. The first "
-            "— *encoding degeneracy*, where one physical packing has "
-            "several valid disjunct selections — is handled by the extra "
+            "- *encoding degeneracy*, where one physical packing has "
+            "several valid disjunct selections: is handled by the extra "
             "lengthwise-overlap inequalities built into the disjunction "
             "above [5]. The remaining two are geometric and handled by "
             "dedicated constraints below."
         )
         st.markdown(
-            "Every packing has mirror images — reflect it across the "
+            "Every packing has mirror images: reflect it across the "
             "strip's centerline or along its length and the strip length "
-            "$L$ is unchanged — so branch-and-bound would prove the same "
+            "$L$ is unchanged: so branch-and-bound would prove the same "
             "bound separately for each reflection. Pinning the *center* "
             "of one reference rectangle $r$ (the largest by area) into "
             "the lower-left quadrant keeps exactly one representative of "
-            "each mirror class without cutting off the optimum — a "
+            "each mirror class without cutting off the optimum: a "
             "standard domain-reduction device from the exact "
             "strip-packing literature:"
         )
@@ -1366,8 +1366,8 @@ $$
         )
         st.markdown(
             "Rectangles with identical dimensions are also "
-            "interchangeable — swapping two identical pieces gives a "
-            '"different" solution with the same $L$ — so the members of '
+            "interchangeable: swapping two identical pieces gives a "
+            '"different" solution with the same $L$: so the members of '
             "each identical group are ordered along the length:"
         )
         st.latex(
@@ -1376,7 +1376,7 @@ $$
         )
         st.markdown(
             "The reference rectangle's group is exempt from the "
-            "ordering — pinning $r$'s position *and* forcing its place "
+            "ordering: pinning $r$'s position *and* forcing its place "
             "in an ordering could jointly cut off every optimum."
         )
 
@@ -1392,7 +1392,7 @@ $$
             "- **Hull (convex hull / disaggregated)**: introduces "
             "disaggregated copies of each variable, one per disjunct, with "
             "scaled bounds. More variables and constraints, but the LP "
-            "relaxation is the convex hull of the feasible region — typically "
+            "relaxation is the convex hull of the feasible region: typically "
             "tighter and faster on harder instances."
         )
 
@@ -1403,13 +1403,13 @@ $$
             "$z_k$ to $[0, 1]$, solve the resulting LP, and either accept "
             "the solution if all indicators are integer or branch on a "
             "fractional one. Either solver runs under the selected time cap "
-            "(10 s default) — if it can't "
+            "(10 s default): if it can't "
             "prove optimality in that time, the Optimizer tab labels the "
             "result **Best length** instead of *Optimal length* and "
             "surfaces the remaining optimality **Gap**. HiGHS is a modern "
             "open-source LP/MILP solver from Edinburgh's ERGO group, "
             "distributed as a pip wheel via `highspy`; Gurobi is the "
-            "commercial benchmark. Same model, same time cap — so the Gap "
+            "commercial benchmark. Same model, same time cap: so the Gap "
             "each leaves is a fair head-to-head."
         )
         st.markdown(
@@ -1468,7 +1468,7 @@ $$
         st.markdown(
             "[8] M. L. Bynum, G. A. Hackebeil, W. E. Hart, C. D. Laird, "
             "B. L. Nicholson, J. D. Siirola, J.-P. Watson, and D. L. Woodruff, "
-            "*Pyomo — Optimization Modeling in Python*, 3rd ed. "
+            "*Pyomo: Optimization Modeling in Python*, 3rd ed. "
             "Cham: Springer, 2021. "
             "[Springer](https://link.springer.com/book/10.1007/978-3-030-68928-5)"
         )
@@ -1533,7 +1533,7 @@ $$
                 "the model; the GDP transformation rewrites each one "
                 "into standard MILP constraints (Big-M / Hull). The "
                 "lengthwise-overlap inequalities in the last two terms "
-                "are the degeneracy-breaking refinement — without them, "
+                "are the degeneracy-breaking refinement: without them, "
                 "a diagonally-separated pair satisfies two terms at "
                 "once, and the solver explores the same packing under "
                 "multiple encodings."
@@ -1602,13 +1602,13 @@ $$
             st.caption(
                 f"Rectangles {ids} ({w_:g} × {l_:g}) form an identical "
                 f"group containing the pinned reference rectangle {r_}, "
-                "so this group is exempt from ordering — combining the "
+                "so this group is exempt from ordering: combining the "
                 "pin with an ordering could cut off every optimum."
             )
         if not chains and not exempt:
             st.markdown(
                 "*No two rectangles share identical dimensions in this "
-                "instance, so no ordering constraints are active — give "
+                "instance, so no ordering constraints are active: give "
                 "two rectangles the same width and length to see the "
                 "chain appear here.*"
             )
@@ -1649,7 +1649,7 @@ st.set_page_config(
 # Initialize session_state defaults and apply any pending reset.
 init_state()
 
-# Fixed-corner home logo (no sidebar in this app — all controls are inline
+# Fixed-corner home logo (no sidebar in this app: all controls are inline
 # on the Optimizer tab). Same pattern as the diet and knapsack apps.
 _FAVICON_DATA_URL = "data:image/png;base64," + base64.b64encode(
     (Path(__file__).parent / "favicon.png").read_bytes()
@@ -1669,7 +1669,7 @@ st.markdown(
         border-radius: 4px;
         display: block;
     }
-    /* Top padding shared across the template family — clears the sticky
+    /* Top padding shared across the template family: clears the sticky
        header without clipping the title. See griffith-pse-app-template. */
     .block-container,
     [data-testid="stMainBlockContainer"] {
@@ -1679,7 +1679,7 @@ st.markdown(
     """
     f'<a href="https://griffith-pse.com" target="_self" '
     f'class="home-logo-corner">'
-    f'<img src="{_FAVICON_DATA_URL}" alt="Griffith PSE — home" />'
+    f'<img src="{_FAVICON_DATA_URL}" alt="Griffith PSE: home" />'
     f"</a>",
     unsafe_allow_html=True,
 )

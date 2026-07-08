@@ -4,7 +4,7 @@
 #   https://strip-packing.griffith-pse.com
 
 app = "griffith-pse-strip-packing"
-primary_region = "ord"  # Chicago — central US, low latency for North American users.
+primary_region = "ord"  # Chicago: central US, low latency for North American users.
 
 [build]
 
@@ -22,6 +22,6 @@ primary_region = "ord"  # Chicago — central US, low latency for North American
   size = "shared-cpu-1x"
   memory = "1gb"
   # Bump for compute-heavy apps:
-  #   shared-cpu-2x  / 2gb   — small ML inference, modest pyomo NLPs
-  #   performance-1x / 4gb   — moderate ML/AI workloads, big optimization
-  #   a10            / 16gb  — GPU (CUDA, large model inference)
+  #   shared-cpu-2x  / 2gb  : small ML inference, modest pyomo NLPs
+  #   performance-1x / 4gb  : moderate ML/AI workloads, big optimization
+  #   a10            / 16gb : GPU (CUDA, large model inference)

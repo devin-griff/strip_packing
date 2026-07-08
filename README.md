@@ -8,7 +8,7 @@ solver (open-source HiGHS or commercial Gurobi); the app reformulates the
 disjunctive non-overlap constraints into a MILP, solves it, and visualizes
 the optimal packing. The in-app **📐 Formulation** tab walks through the
 disjunctive math, the three reformulations, and the symmetry-breaking
-constraints — see [References](#references) below.
+constraints: see [References](#references) below.
 
 **Live demo:** https://strip-packing.griffith-pse.com  
 **Home:** https://griffith-pse.com
@@ -18,7 +18,7 @@ constraints — see [References](#references) below.
     pip install -r requirements.txt
     streamlit run app.py
 
-HiGHS ships as a pip wheel (`highspy`), so `pip install` covers everything —
+HiGHS ships as a pip wheel (`highspy`), so `pip install` covers everything -
 no separate solver install needed. The Gurobi mode additionally needs a
 Gurobi license (set `GRB_LICENSE_FILE` to point at it); without one,
 gurobipy falls back to its bundled size-limited trial license, which only
@@ -36,11 +36,11 @@ auto-stop machines. Custom domain wired through Cloudflare DNS.
 
 ## Files
 
-- `app.py` — Streamlit UI, Pyomo model, HiGHS/Gurobi solve paths
-- `Strip packing.ipynb` — formulation in a notebook
-- `requirements.txt` — Python deps
-- `Dockerfile`, `fly.toml`, `.dockerignore` — Fly.io production image config
-- `.github/workflows/deploy.yml` — auto-deploy pipeline
+- `app.py`: Streamlit UI, Pyomo model, HiGHS/Gurobi solve paths
+- `Strip packing.ipynb`: formulation in a notebook
+- `requirements.txt`: Python deps
+- `Dockerfile`, `fly.toml`, `.dockerignore`: Fly.io production image config
+- `.github/workflows/deploy.yml`: auto-deploy pipeline
 
 ## References
 
@@ -80,6 +80,6 @@ method," *Mathematical Programming Computation*, vol. 10, no. 1, pp. 119–142,
 [gurobi.com](https://www.gurobi.com)
 
 [8] M. L. Bynum, G. A. Hackebeil, W. E. Hart, C. D. Laird, B. L. Nicholson,
-J. D. Siirola, J.-P. Watson, and D. L. Woodruff, *Pyomo — Optimization
+J. D. Siirola, J.-P. Watson, and D. L. Woodruff, *Pyomo: Optimization
 Modeling in Python*, 3rd ed. Cham: Springer, 2021.
 [Springer](https://link.springer.com/book/10.1007/978-3-030-68928-5)
