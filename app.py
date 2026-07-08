@@ -1641,7 +1641,7 @@ def render_logs_tab():
 # then assemble the three tabs.
 
 st.set_page_config(
-    page_title="Strip Packing GDP Optimizer",
+    page_title="Strip Packing",
     page_icon="favicon.png",
     layout="wide",
 )
