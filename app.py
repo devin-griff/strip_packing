@@ -1679,7 +1679,7 @@ st.markdown(
     """
     f'<a href="https://griffith-pse.com" target="_self" '
     f'class="home-logo-corner">'
-    f'<img src="{_FAVICON_DATA_URL}" alt="Griffith PSE: home" />'
+    f'<img src="{_FAVICON_DATA_URL}" alt="Griffith PSE: home" width="32" height="32" style="width:32px;height:32px;border-radius:4px;display:block" />'
     f"</a>",
     unsafe_allow_html=True,
 )
